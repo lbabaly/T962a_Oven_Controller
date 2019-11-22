@@ -4,16 +4,49 @@
  *  Created on: 20Feb.,2017
  *      Author: podonoghue
  */
-#ifndef PROJECT_HEADERS_CMSIS_H_
-#define PROJECT_HEADERS_CMSIS_H_
+#ifndef INCLUDE_USBDM_CMSIS_H_
+#define INCLUDE_USBDM_CMSIS_H_
 
+#include <cmath>
 #include "cmsis_os.h"
-#include "hardware.h"
+#include "error.h"
 
 /**
  * Namespace enclosing wrapper classes for CMSIS-RTX
  */
 namespace CMSIS {
+
+/**
+ * Set error code
+ *
+ * @param[in]  err Error code to set
+ *
+ * @return Error code
+ */
+inline static USBDM::ErrorCode setCmsisErrorCode(int err) {
+   if (err != 0) {
+      // Bump error CMSIS error code to avoid conflict with USBDM error codes
+      err |= USBDM::E_CMSIS_ERR_OFFSET;
+   }
+   USBDM::errorCode = (USBDM::ErrorCode)err;
+   return USBDM::errorCode;
+}
+
+/**
+ * Set error code and check for error
+ *
+ * @param[in]  err Error code to set
+ *
+ * @return Error code
+ */
+inline static USBDM::ErrorCode setAndCheckCmsisErrorCode(int err) {
+   if (err != 0) {
+      // Bump error CMSIS error code to avoid conflict with USBDM error codes
+      err |= USBDM::E_CMSIS_ERR_OFFSET;
+   }
+   USBDM::errorCode = (USBDM::ErrorCode)(err);
+   return USBDM::checkError();
+}
 
 using Callback = void (*)(const void *);
 
@@ -71,8 +104,8 @@ private:
       const osTimerDef_t *timer;   // Pointer to Timer definition
    };
 
-   osTimerControlBlock_t  os_timer_cb  = {0,0,0,0,0,0,0,0};
-   const osTimerDef_t     os_timer_def;
+   volatile osTimerControlBlock_t  os_timer_cb  = {0,0,0,0,0,0,0,0};
+   const    osTimerDef_t           os_timer_def;
 
 public:
    /**
@@ -83,9 +116,9 @@ public:
     * @param[in] timerType Type of timer e.g. osTimerPeriodic, osTimerOnce
     */
    Timer(Callback callback, void *argument, os_timer_type timerType) :
-     os_timer_def{callback, (void*)&os_timer_cb} {
+      os_timer_def{callback, (void*)&os_timer_cb} {
       osTimerId timer_id __attribute__((unused)) = osTimerCreate(&os_timer_def, timerType, argument);
-      assert((void*)timer_id == (void*)&os_timer_cb);
+      usbdm_assert((void*)timer_id == (void*)&os_timer_cb, "Internal check failed");
    }
    /**
     * Constructor - Create timer of given type
@@ -123,7 +156,13 @@ public:
     * @return false Failure
     */
    bool create(void *argument=nullptr, os_timer_type timerType=osTimerPeriodic) {
-      osTimerId timer_id __attribute__((unused)) = osTimerCreate(&os_timer_def, timerType, argument);
+      if (os_timer_cb.state != 0) {
+         osStatus rc = destroy();
+         if (rc != osOK) {
+            return rc;
+         }
+      }
+      osTimerId timer_id = osTimerCreate(&os_timer_def, timerType, argument);
       return ((void*)timer_id == (void*)&os_timer_cb);
    }
    /**
@@ -149,7 +188,7 @@ public:
     * @param[in] millisec Interval in milliseconds
     */
    void start(int millisec) {
-      USBDM::setAndCheckCmsisErrorCode(osTimerStart((osTimerId)&os_timer_cb, millisec));
+      setAndCheckCmsisErrorCode(osTimerStart((osTimerId)&os_timer_cb, millisec));
    }
    /**
     * Start or restart timer
@@ -190,7 +229,7 @@ public:
  *     //
  *     // Function executed as timer call-back
  *     //
- *     virtual void callback(void *) override {
+ *     virtual void callback() override {
  *        printf(fName);
  *     }
  *
@@ -277,7 +316,7 @@ public:
     */
    Mutex() {
       osMutexId mutex_id __attribute__((unused)) = osMutexCreate(&os_mutex_def);
-      assert((void*)mutex_id == (void*)os_mutex_cb);
+      usbdm_assert((void*)mutex_id == (void*)os_mutex_cb, "Internal check failed");
    }
    /**
     * Delete mutex
@@ -366,7 +405,7 @@ public:
     */
    Semaphore(int32_t count) {
       osSemaphoreId semaphore_id __attribute__((unused)) = osSemaphoreCreate(&os_semaphore_def, count);
-      assert((void*)semaphore_id == (void*)os_semaphore_cb);
+      usbdm_assert((void*)semaphore_id == (void*)os_semaphore_cb, "Internal check failed");
    }
    /**
     * Delete semaphore
@@ -383,7 +422,7 @@ public:
     */
    int32_t wait(uint32_t millisec=osWaitForever) {
       int32_t rc = osSemaphoreWait((osSemaphoreId)os_semaphore_cb, millisec);
-      assert(rc >= 0);
+      usbdm_assert(rc >= 0, "Illegal parameters");
       return rc;
    }
    /**
@@ -391,7 +430,7 @@ public:
     */
    void release() {
       osStatus status __attribute__((unused)) = osSemaphoreRelease((osSemaphoreId)os_semaphore_cb);
-      assert(status == osOK);
+      usbdm_assert(status == osOK, "Failed semaphore");
    }
    /**
     * Get semaphore ID
@@ -454,7 +493,7 @@ class Pool {
 
 private:
    uint32_t pool[3+((sizeof(T)+3)/4)*size] = {0};
-   const osPoolDef_t os_pool_def                 = { size, sizeof(T), pool };
+   const    osPoolDef_t os_pool_def        = { size, sizeof(T), pool };
 
 public:
    Pool() {
@@ -467,7 +506,7 @@ public:
     */
    void create() {
       osPoolId pool_id = osPoolCreate(&os_pool_def);
-      assert((void*)pool_id == (void*)pool);
+      usbdm_assert((void*)pool_id == (void*)pool, "Internal check failed");
    }
    /**
     * Allocate a memory block from the memory pool.
@@ -504,7 +543,7 @@ public:
     */
    void free(T *buffer) {
       osStatus status = osPoolFree((osPoolId)pool, buffer);
-      assert(status == osOK);
+      usbdm_assert(status == osOK, "Internal check failed");
    }
    /**
     * Get pool ID
@@ -553,7 +592,7 @@ public:
     */
    void run(void *argument=nullptr) {
       thread_id = osThreadCreate(&thread_def, argument);
-      USBDM::setAndCheckCmsisErrorCode((thread_id != nullptr)?osOK:osErrorOS);
+      setAndCheckCmsisErrorCode((thread_id != nullptr)?osOK:osErrorOS);
    }
    /**
     * Get thread ID
@@ -564,7 +603,7 @@ public:
       return thread_id;
    }
    /**
-    * Get thread ID of current process
+    * Get thread ID of current thread
     *
     * @return ID of thread
     */
@@ -580,6 +619,25 @@ public:
       return osThreadGetPriority(thread_id);
    }
    /**
+    * Get priority of current thread
+    *
+    * @return Priority of thread
+    */
+   static osPriority getMyPriority() {
+      auto threadId = CMSIS::Thread::getMyId();
+      return osThreadGetPriority(threadId);
+   }
+   /**
+    * Get thread Priority
+    *
+    * @param[in] threadId Thread ID of thread to adjust priority of
+    *
+    * @return Priority of thread
+    */
+   static osPriority getPriority(osThreadId threadId) {
+      return osThreadGetPriority(threadId);
+   }
+   /**
     * Set thread Priority
     *
     * @param[in] priority Priority to set for thread
@@ -591,6 +649,36 @@ public:
     */
    osStatus setPriority(osPriority priority) {
       return osThreadSetPriority(thread_id, priority);
+   }
+
+   /**
+    * Set thread Priority
+    *
+    * @param[in] threadId Thread ID of thread to adjust priority of
+    * @param[in] priority Priority to set for thread
+    *
+    * @return osOK:              The priority of the thread has been successfully changed.
+    * @return osErrorValue:      Incorrect priority value.
+    * @return osErrorResource:   Thread that is not an active thread.
+    * @return osErrorISR:        Cannot be called from interrupt service routines.
+    */
+   static osStatus setPriority(osThreadId threadId, osPriority osPriority) {
+      return osThreadSetPriority(threadId, osPriority);
+   }
+
+   /**
+    * Set priority of current thread
+    *
+    * @param[in] priority Priority to set for thread
+    *
+    * @return osOK:              The priority of the thread has been successfully changed.
+    * @return osErrorValue:      Incorrect priority value.
+    * @return osErrorResource:   Thread that is not an active thread.
+    * @return osErrorISR:        Cannot be called from interrupt service routines.
+    */
+   static osStatus setMyPriority(osPriority osPriority) {
+      auto threadId = CMSIS::Thread::getMyId();
+      return osThreadSetPriority(threadId, osPriority);
    }
 
    /**
@@ -657,7 +745,7 @@ public:
 
 #if (osFeature_Wait != 0)
    /**
-    * Wait for any event of the type Signal, Message, Mail for a specified time peiod.
+    * Wait for any event of the type Signal, Message, Mail for a specified time period.
     * While the system waits the thread that is calling this function is put into the state WAITING. When millisec is set to osWaitForever the function will wait for an infinite time until a event occurs.
     *
     * @param[in] millisec How long to wait in milliseconds. Use osWaitForever for indefinite wait.
@@ -732,7 +820,7 @@ public:
  *     //
  *     // Function executed as thread
  *     //
- *     virtual void task(void *) override {
+ *     virtual void task() override {
  *        for(;;) {
  *           printf(fName);
  *           CMSIS::Thread::delay(300);
@@ -822,12 +910,14 @@ public:
  * Wrapper for CMSIS Message Queue
  *
  * Basic approach:
- *    - Message queues work in conjunction with a <b>pool</b> of <b>messages</b>.
- *    - Messages are <b>allocated</b> from the pool and added to the queue.
- *    - Messages are then removed from the queue and <b>freed</b> after use.
+ *    - Message queues can buffer a number of items (messages) being transferred.
+ *    - Messages can be added or removed from the queue.
+ *    - Typically the messages will be a small integral item such as an integer.  Alternatively \n
+ *      it could be a pointer to a larger item that is statically or dynamically allocated.
+ *      The allocation and deallocation is not handled by the message queue.
  *
  * @tparam T      Type of items in message queue. Must fit in 32-bits\n
- *                This is typically a simple type like a character or integer or a pointer to
+ *                This is typically a simple type like a character or integer, or a pointer to
  *                a larger type allocated in some independent fashion.
  * @tparam size   Size of message queue in items
  *
@@ -863,7 +953,7 @@ public:
  *       if (event.status != osEventMessage) {
  *          break;
  *       }
- *       MessageData *data = (MessageData *)event.value.p;
+ *       MessageData *data = messageQueue.getValueFromEvent(event);
  *       printf("%d: Received %p (%d, %d)\n\r", i, data, data->a, data->b);
  *    }
  *    messageQueueTestComplete = true;
@@ -920,7 +1010,7 @@ public:
          threadId = thread->getId();
       }
       osMessageQId message_id = osMessageCreate(&os_pool_def, threadId);
-      assert((void*)message_id == (void*)queue);
+      usbdm_assert((void*)message_id == (void*)queue, "Internal check failed");
       return message_id;
    }
    /**
@@ -971,6 +1061,17 @@ public:
       return osMessageGet((osMessageQId)queue, millisec);
    }
    /**
+    * Obtains object contained in event.
+    *
+    * @param event Event to use.  Usually obtained from get().
+    *
+    * @return Object from event
+    */
+   static T getValueFromEvent(osEvent event) {
+      return (T)(event.value.p);
+   }
+
+   /**
     * Get message from queue.
     * Returns immediately (for use in ISRs)
     *
@@ -981,7 +1082,7 @@ public:
     */
    osEvent getISR() {
       osEvent event = osMessageGet((osMessageQId)queue, 0);
-      assert (event.status != osErrorParameter);
+      usbdm_assert (event.status != osErrorParameter, "Internal check failed");
       return event;
    }
    /**
@@ -1002,8 +1103,8 @@ public:
  *    - Messages are <b>allocated</b> from the pool and added to the mail queue.
  *    - Messages are then removed from the mail queue and <b>freed</b> after use.
  *
- * @tparam T      Type of items in mail queue (determines size of items in pool)
- * @tparam size   Size of mail queue in items (determines number of items that can be allocated from the pool)
+ * @tparam T           Type of items in mail queue (determines size of items in pool)
+ * @tparam queueSize   Size of mail queue in items (determines number of items that can be allocated from the pool)
  *
  * Example:
  * @code
@@ -1041,7 +1142,7 @@ public:
  *       if (event.status != osEventMail) {
  *          break;
  *       }
- *       MailData *data = (MailData *)event.value.p;
+ *       MailData *data = messageQueue.getValueFromEvent(event);
  *       printf("%d: Received  %p (%d, %d)\n\r", i, data, data->a, data->b);
  *       mailQueue.free(data);
  *    }
@@ -1070,14 +1171,32 @@ public:
  * }
  * @endcode
  */
-template <typename T, size_t size, Thread *thread=nullptr>
+template <typename T, size_t queueSize, Thread *thread=nullptr>
 class MailQueue {
 
+   struct MainQueue_cb {
+      uint8_t     cb_type;          /** Control Block Type                      */
+      uint8_t     state;            /** State flag variable                     */
+      uint8_t     isr_st;           /** State flag variable for isr functions   */
+      void       *p_lnk;            /** Chain of tasks waiting for message      */
+      uint16_t    first;            /** Index of the message list begin         */
+      uint16_t    last;             /** Index of the message list end           */
+      uint16_t    count;            /** Actual number of stored messages        */
+      uint16_t    size;             /** Maximum number of stored messages       */
+      void        *msg[queueSize];  /** FIFO of Message pointers   */
+   };
+   struct MessageBuffer {
+     void      *free;                                 /** Pointer to first free memory block      */
+     void      *end;                                  /** Pointer to memory block end             */
+     uint32_t  blk_size;                              /** Memory block size                       */
+     uint32_t  messages[((sizeof(T)+3)/4)*queueSize]; /** Message pool*/
+   };
+
 private:
-   uint32_t            queue[4+size];
-   uint32_t            messages[3+((sizeof(T)+3)/4)*size];
-   const  void         *pool[2]       = {queue, messages};
-   const  os_mailQ_def os_mail_def    = {size, sizeof(T), pool};
+   MainQueue_cb         queue;
+   MessageBuffer        messages;
+   const  void         *pool[2]       = {&queue, &messages};
+   const  os_mailQ_def os_mail_def    = {queueSize, sizeof(T), pool};
 
    //   static void *operator new     (size_t) = delete;
    //   static void *operator new[]   (size_t) = delete;
@@ -1085,6 +1204,14 @@ private:
    //   static void  operator delete[](void*)  = delete;
 
 public:
+   bool checkBounds(void *p) {
+      return ((p == nullptr) || ((p>=messages.messages) && (p<messages.messages+((sizeof(T)+3)/4)*queueSize)));
+   }
+
+   void check() {
+      usbdm_assert(checkBounds(messages.free), "Pointer corrupted");
+   }
+
    /**
     * Create mail queue
     */
@@ -1094,7 +1221,7 @@ public:
          threadId = thread->getId();
       }
       osMailQId queue_id __attribute__((unused)) = osMailCreate(&os_mail_def, threadId);
-      assert(queue_id == (osMailQId)pool);
+      usbdm_assert(queue_id == (osMailQId)pool, "Internal check failed");
    }
    /**
     * Allocate a memory block from the mail queue memory pool
@@ -1104,7 +1231,7 @@ public:
     * @return Pointer to allocated block or nullptr on failure.
     */
    T *alloc(uint32_t millisec=osWaitForever) {
-      if ((messages[0]==0) && (messages[1]==0)) {
+      if ((messages.free==nullptr) && (messages.end==nullptr)) {
          create();
       }
       return (T *) osMailAlloc((os_mailQ_cb *)&pool, millisec);
@@ -1131,7 +1258,7 @@ public:
     * @return Pointer to allocated block or nullptr on failure.
     */
    T *calloc(uint32_t millisec=osWaitForever) {
-      if ((messages[0]==0) && (messages[0]==0)) {
+      if ((messages.free == nullptr) && (messages.end == nullptr)) {
          create();
       }
       return (T *)osMailCAlloc((os_mailQ_cb *)&pool, millisec);
@@ -1154,9 +1281,9 @@ public:
     *
     * @param[in] mail Mail block to free (previously allocated with alloc or calloc)
     *
-    * @return osOK: the mail block is released.
-    * @return osErrorValue: mail block does not belong to the mail queue pool.
-    * @return osErrorParameter: the value to the parameter queue_id is incorrect.
+    * @return osOK:              The mail block is released.
+    * @return osErrorValue:      Mail block does not belong to the mail queue pool.
+    * @return osErrorParameter:  The value to the parameter queue_id is incorrect.
     */
    osStatus free(T *mail) {
       return osMailFree((osMailQId)&pool, mail);
@@ -1168,10 +1295,10 @@ public:
     * @param[in] millisec How long to wait in milliseconds. Use osWaitForever for indefinite wait.
     *
     * @return Status with:
-    * @return osOK: no mail is available in the queue and no timeout was specified
-    * @return osEventTimeout: no mail has arrived during the given timeout period.
-    * @return osEventMail: mail received, value.p contains the pointer to mail content.
-    * @return osErrorParameter: a parameter is invalid or outside of a permitted range.
+    * @return osOK:              No mail is available in the queue and no timeout was specified
+    * @return osEventTimeout:    No mail has arrived during the given timeout period.
+    * @return osEventMail:       Mail received, value.p contains the pointer to mail content.
+    * @return osErrorParameter:  A parameter is invalid or outside of a permitted range.
     */
    osEvent get(uint32_t millisec=osWaitForever) {
       return osMailGet((os_mailQ_cb *)&pool, millisec);
@@ -1181,12 +1308,23 @@ public:
     * Get a mail item from the mail queue.\n
     * For use in ISRs
     *
-    * @return osOK: no mail is available in the queue
-    * @return osEventMail: mail received, value.p contains the pointer to mail content.
-    * @return osErrorParameter: a parameter is invalid or outside of a permitted range.
+    * @return osOK:              No mail is available in the queue
+    * @return osEventMail:       Mail received, value.p contains the pointer to mail content.
+    * @return osErrorParameter:  A parameter is invalid or outside of a permitted range.
     */
    osEvent getISR() {
       return osMailGet((os_mailQ_cb *)&pool, 0);
+   }
+
+   /**
+    * Obtains pointer to object indicated by event.
+    *
+    * @param event Event to use.  Usually obtained from get().
+    *
+    * @return Object reference
+    */
+   static T *getValueFromEvent(osEvent event) {
+      return (T*)(event.value.p);
    }
 
    /**
@@ -1194,9 +1332,9 @@ public:
     *
     * @param[in] mail A mail block previously allocated by alloc() or calloc().
     *
-    * @return osOK: no mail is available in the queue and no timeout was specified
-    * @return osErrorValue: mail was previously not allocated as memory slot.
-    * @return osErrorParameter: a parameter is invalid or outside of a permitted range.
+    * @return osOK:              The message is put into the queue.
+    * @return osErrorValue:      Mail was previously not allocated as memory slot.
+    * @return osErrorParameter:  A parameter is invalid or outside of a permitted range.
     */
    osStatus put(T *mail) {
       return osMailPut((os_mailQ_cb *)&pool, mail);
@@ -1212,4 +1350,4 @@ public:
 };
 
 }; // end namespace CMSIS
-#endif /* PROJECT_HEADERS_CMSIS_H_ */
+#endif /* INCLUDE_USBDM_CMSIS_H_ */

@@ -8,12 +8,6 @@
 #include <derivative.h>
 #include "system.h"
 #include "hardware.h"
-#if defined(USBDM_UART0_IS_DEFINED) || defined(USBDM_UART1_IS_DEFINED) || defined(USBDM_UART2_IS_DEFINED) || defined(USBDM_UART3_IS_DEFINED) || defined(USBDM_UART4_IS_DEFINED)
-#include "uart.h"
-#endif
-#if defined(USBDM_LPUART0_IS_DEFINED) || defined(USBDM_LPUART1_IS_DEFINED) || defined(USBDM_LPUART2_IS_DEFINED)
-#include "lpuart.h"
-#endif
 #include "console.h"
 
  /*
@@ -24,6 +18,8 @@
   * This file is generated automatically.
   * Any manual changes will be lost.
   */
+
+#if USE_CONSOLE
 
 namespace USBDM {
 
@@ -38,12 +34,12 @@ Console console;
 
 /*
  * Initialises the Console
- *
- * @param baudrate - the baud rate to use e.g. DEFAULT_BAUD_RATE
  */
 extern "C"
 void console_initialise() {
    console.setBaudRate(defaultBaudRate);
+   console.setEcho();
+   console.configureAllPins();
 }
 
 /*
@@ -67,21 +63,27 @@ void console_txChar(int ch) {
 }
 
 /*
- * Receives a single character fropm Console (blocking)
+ * Receives a single character from Console (blocking)
  *
  * @return - character received
  */
 extern "C"
 int console_rxChar(void) {
-   int ch = console.readChar();
-   if (ch == '\r') {
-      ch = '\n';
-   }
-   return ch;
+   return console.readChar();
 }
 
+/**
+ * Print simple log message to console
+ *
+ * @param msg Message to print
+ */
+void log_error(const char *msg) {
+   console.writeln(msg);
+}
 /**
  * @}
  */
 
 } // End namespace USBDM
+
+#endif /* USE_CONSOLE */

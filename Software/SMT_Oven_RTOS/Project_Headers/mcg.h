@@ -23,6 +23,12 @@
 
 namespace USBDM {
 
+/**
+ * @addtogroup MCG_Group MCG, Multipurpose Clock Generator
+ * @brief Abstraction for Multipurpose Clock Generator
+ * @{
+ */
+
 /** MCGFFCLK - Fixed frequency clock (input to FLL) */
 extern volatile uint32_t SystemMcgffClock;
 /** MCGOUTCLK - Primary output from MCG, various sources */
@@ -32,19 +38,25 @@ extern volatile uint32_t SystemMcgFllClock;
 /** MCGPLLCLK - Output of PLL */
 extern volatile uint32_t SystemMcgPllClock;
 /** Core/System clock (from MCGOUTCLK/CLKDIV) */
-extern volatile uint32_t SystemCoreClock;
+//extern volatile uint32_t SystemCoreClock;
 /** Bus clock (from MCGOUTCLK/CLKDIV) */
-extern volatile uint32_t SystemBusClock;
+//extern volatile uint32_t SystemBusClock;
 /** LPO - Low power oscillator 1kHz clock available in LP modes */
 extern volatile uint32_t SystemLpoClock;
 
 extern void setSysDividersStub(uint32_t simClkDiv1);
 
 /**
- * @addtogroup MCG_Group MCG, Multipurpose Clock Generator
- * @brief Abstraction for Multipurpose Clock Generator
- * @{
+ * Clock configuration names
  */
+enum ClockConfig {
+   ClockConfig_PEE_48MHz,
+   ClockConfig_BLPE_4MHz,
+   ClockConfig_FEE_40MHz,
+
+   ClockConfig_default = 0,
+};
+
 /**
  * Type definition for MCG interrupt call back
  */
@@ -64,10 +76,15 @@ private:
    /** Callback function for ISR */
    static MCGCallbackFunction callback;
 
-   /** Pointer to hardware */
-   static constexpr volatile MCG_Type *mcg = McgInfo::mcg;
+   /** Hardware instance */
+   static __attribute__((always_inline)) volatile MCG_Type &mcg() { return McgInfo::mcg(); }
 
 public:
+   /**
+    * Table of clock settings
+    */
+   static const McgInfo::ClockInfo clockInfo[];
+
    /**
     * Transition from current clock mode to mode given
     *
@@ -75,7 +92,7 @@ public:
     *
     * @return E_NO_ERROR on success
     */
-   static int clockTransition(const McgInfo::ClockInfo &to);
+   static ErrorCode clockTransition(const McgInfo::ClockInfo &to);
 
    /**
     * Update SystemCoreClock variable
@@ -94,25 +111,28 @@ public:
    }
 
    /**
-    * Enable/disable interrupts in NVIC
-    *
-    * @param[in]  enable true to enable, false to disable
+    * Enable interrupts in NVIC
     */
-   static void enableNvicInterrupts(bool enable=true) {
-
-      if (enable) {
-         // Enable interrupts
-         NVIC_EnableIRQ(McgInfo::irqNums[0]);
-
-         // Set priority level
-         NVIC_SetPriority(McgInfo::irqNums[0], McgInfo::irqLevel);
-      }
-      else {
-         // Disable interrupts
-         NVIC_DisableIRQ(McgInfo::irqNums[0]);
-      }
+   static void enableNvicInterrupts() {
+      NVIC_EnableIRQ(McgInfo::irqNums[0]);
    }
 
+   /**
+    * Enable and set priority of interrupts in NVIC
+    * Any pending NVIC interrupts are first cleared.
+    *
+    * @param[in]  nvicPriority  Interrupt priority
+    */
+   static void enableNvicInterrupts(uint32_t nvicPriority) {
+      enableNvicInterrupt(McgInfo::irqNums[0], nvicPriority);
+   }
+
+   /**
+    * Disable interrupts in NVIC
+    */
+   static void disableNvicInterrupts() {
+      NVIC_DisableIRQ(McgInfo::irqNums[0]);
+   }
    /**
     * MCG interrupt handler -  Calls MCG callback
     */
@@ -135,37 +155,58 @@ public:
    static McgInfo::ClockMode currentClockMode;
 
    /**
+    * Get current clock mode
+    *
+    * @return
+    */
+   static McgInfo::ClockMode getClockMode() {
+      return currentClockMode;
+   }
+
+   /**
+    * Get name for clock mode
+    *
+    * @return Pointer to static string
+    */
+   static const char *getClockModeName(McgInfo::ClockMode);
+
+   /**
+    * Get name for current clock mode
+    *
+    * @return Pointer to static string
+    */
+   static const char *getClockModeName() {
+      return getClockModeName(getClockMode());
+   }
+
+   /**
     *  Configure the MCG for given mode
     *
     *  @param[in]  settingNumber CLock setting number
     */
-   static void configure(int settingNumber=0) {
-      clockTransition(McgInfo::clockInfo[settingNumber]);
+   static void configure(ClockConfig settingNumber=ClockConfig_default) {
+      clockTransition(clockInfo[settingNumber]);
    }
 
    /**
-    *   Disable the MCG channel
+    *   Finalise the MCG
     */
    static void finalise() {
-      clockTransition(McgInfo::clockInfo[0]);
+      clockTransition(clockInfo[ClockConfig_default]);
    }
 
    /**
-    * Switch to/from high speed run mode
-    * Changes the CPU clock frequency/1, and bus clock frequency /2
-    * If the clock is set up for 120 MHz this will be the highest performance possible.
-    *
-    * This routine assumes that the clock preferences have been set up for the usual RUN mode and only
-    * the Core clock divider needs to be changed.
-    *
-    * @param[in]  enable True to switch to HSRUN mode
+    * Initialise MCG to default settings.
     */
-   static void hsRunMode(bool enable);
+   static void defaultConfigure();
 
    /**
-    * Sets up the clock out of RESET
+    * Set up the OSC out of reset.
     */
-   static void initialise(void);
+   static void initialise() {
+      defaultConfigure();
+   }
+
 };
 
 /**

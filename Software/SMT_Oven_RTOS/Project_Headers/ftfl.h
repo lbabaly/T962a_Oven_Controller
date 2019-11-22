@@ -6,13 +6,18 @@
  *      Author: podonoghue
  */
 
+/* *************************************************************
+ * NOTE - Can't use other objects here as initialisation of
+ *        Flash is done very early (including writeln())
+ ************************************************************* */
+
 #ifndef SOURCES_FLASH_H_
 #define SOURCES_FLASH_H_
 
-#include <assert.h>
 #include "derivative.h"
 #include "hardware.h"
 #include "delay.h"
+#include "smc.h"
 
 namespace USBDM {
 /**
@@ -20,7 +25,6 @@ namespace USBDM {
  * @brief Abstraction for Flash Memory Module
  * @{
  */
-
 // Error codes
 enum FlashDriverError_t {
    FLASH_ERR_OK                = (0),
@@ -39,12 +43,33 @@ enum FlashDriverError_t {
    FLASH_ERR_UNKNOWN           = (13), // Unspecified error
    FLASH_ERR_PROG_RDCOLERR     = (14), // Read Collision
    FLASH_ERR_NEW_EEPROM        = (15), // Indicates EEPROM has just bee partitioned and need initialisation
+   FLASH_ERR_NOT_AVAILABLE     = (16), // Attempt to do flash operation when not available (e.g. while in VLPR mode)
 };
 
 /**
- * Class representing Flash interface
+ * Class representing Flash interface.
  */
 class Flash : public FtflInfo {
+
+public:
+    // Sector size for program flash (minimum erase element)
+   static constexpr unsigned programFlashSectorSize = 2048;
+
+   // Phrase size for program flash (minimum programming element)
+   static constexpr unsigned programFlashPhraseSize = 4;
+
+   // Sector size for data flash (minimum erase element)
+   static constexpr unsigned dataFlashSectorSize = 2048;
+
+   // Phrase size for data flash (minimum programming element)
+   static constexpr unsigned dataFlashPhraseSize = 4;
+
+
+   /** A23 == 0 => indicates PROGRAM flash */
+   static constexpr uint32_t PROGRAM_ADDRESS_FLAG = (0<<23);
+
+   /** A23 == 1 => indicates DATA flash */
+   static constexpr uint32_t DATA_ADDRESS_FLAG    = (1<<23);
 
 protected:
 
@@ -52,30 +77,30 @@ protected:
    static constexpr unsigned MINIMUM_BACKING_RATIO = 16;
 
    /**
-    * Constructor\n
+    * Constructor.
     * Typically this method would be overridden in a derived class
     * to do the initialisation of the flash and non-volatile variables.
     * Alternatively, the startup code may call the static methods directly.
     */
    Flash() {
       static int singletonFlag __attribute__((unused)) = false;
-      assert (!singletonFlag);
+      usbdm_assert (!singletonFlag, "Creating multiple instances of Flash");
       singletonFlag = true;
       waitForFlashReady();
    }
 
    /**
-    * Launch & wait for Flash command to complete
+    * Launch & wait for Flash command to complete.
     */
    static void executeFlashCommand_asm();
 
    /**
-    * Launch & wait for Flash command to complete
+    * Launch & wait for Flash command to complete.
     */
    static FlashDriverError_t executeFlashCommand();
 
    /**
-    * Read Flash Resource (IFR etc)
+    * Read Flash Resource (IFR etc).
     * This command reads 4 bytes from the selected flash resource
     *
     * @param[in]  resourceSelectCode 00 => IFR, 01 => Version ID
@@ -87,7 +112,7 @@ protected:
    static FlashDriverError_t readFlashResource(uint8_t resourceSelectCode, uint32_t address, uint8_t *data);
 
    /**
-    * Program EEPROM Data Size Code and FlexNVM Partition Code
+    * Program EEPROM Data Size Code and FlexNVM Partition Code.
     *
     * See device reference manual for the meaning of the following parameters
     *
@@ -99,7 +124,7 @@ protected:
    static FlashDriverError_t partitionFlash(uint8_t eeprom, uint8_t partition);
 
    /**
-    * Initialise the EEPROM
+    * Initialise the EEPROM.
     *
     * This function should be called before the first access to variables located in the eeprom.
     *
@@ -112,30 +137,33 @@ protected:
     *
     * @note This routine will only partition EEPROM when first executed after the device has been programmed.
     */
-   template<EepromSel eeprom=eepromSel, PartitionSel partition=partitionSel, PartitionSplit split=partitionSplit>
+   template<EepromSel eeprom=eepromSel, PartitionSel partition=partitionSel, SplitSel split=partitionSplit>
    static FlashDriverError_t initialiseEeprom () {
 
-   //   printf("initialiseEeprom(eeprom=%d bytes, eeprom backing=%ldK, residual flash=%ldK)\n",
-   //         eepromSizes[eeprom].size, partitionInformation[partition].eeepromSize>>10, partitionInformation[partition].flashSize>>10);
+//      console.
+//      write("initialiseEeprom(eeprom=").write(eepromSizes[eeprom].size).write(" bytes, ").
+//      write("eeprom backing=").write(eepromSizes[eeprom].size).write("K, ").
+//      write("residual flash=").write(partitionInformation[partition].eeepromSize>>10).writeln("K)");
 
       if (isFlexRamConfigured()) {
+//         console.writeln("Flex RAM is already configured");
          return FLASH_ERR_OK;
       }
       if ((eepromSizes[eeprom].size*MINIMUM_BACKING_RATIO)>(partitionInformation[partition].eeepromSize)) {
-//         printf("Backing ratio (Flash/EEPROM) is too small\n");
+//         console.writeln("Backing ratio (Flash/EEPROM) is too small\n");
          USBDM::setErrorCode(E_FLASH_INIT_FAILED);
          return FLASH_ERR_ILLEGAL_PARAMS;
       }
-   #if defined(RELEASE_BUILD)
+#if defined(RELEASE_BUILD)
       // EEPROM only available in release build
       FlashDriverError_t rc = partitionFlash(eepromSizes[eeprom].value|split, partitionInformation[partition].value);
       if (rc != 0) {
-         //      printf("Partitioning Flash failed\n");
+//         console.writeln("Partitioning Flash failed\n");
          return rc;
       }
       // Indicate EEPROM needs initialisation - this is not an error
       return FLASH_ERR_NEW_EEPROM;
-   #else
+#else
       (void) eeprom;
       (void) partition;
       (void) split;
@@ -145,58 +173,140 @@ protected:
       // Initialisation pretend EEPROM on every reset
       // This return code is not an error
       return FLASH_ERR_NEW_EEPROM;
-   #endif
+#endif
    }
 
 public:
 
    /**
-    * Checks if the flexRAM has been configured\n
+    * Hardware instance pointer
+    *
+    * @return Reference to Flash hardware
+    */
+   __attribute__((always_inline)) static volatile FTFL_Type &flashController() { return ftfl(); }
+
+   /**
+    * Checks if the flexRAM has been configured.
     * Will wait for flash ready as necessary
     *
     * @return true if configured
     */
    static bool isFlexRamConfigured() {
+#if 1
+      return waitForFlashReady() && (flashController().FCNFG&FTFL_FCNFG_EEERDY_MASK);
+#else
+      console.write("flashController().FCNFG = ").writeln(flashController().FCNFG, Radix_16);
+      console.write("flashController().FCNFG.FTFL_FCNFG_RAMRDY = ").writeln((bool)(flashController().FCNFG&FTFL_FCNFG_RAMRDY_MASK));
+      console.write("flashController().FCNFG.FTFL_FCNFG_EEERDY = ").writeln((bool)(flashController().FCNFG&FTFL_FCNFG_EEERDY_MASK));
 
-      return waitForFlashReady() && (FTFL->FCNFG&FTFL_FCNFG_EEERDY_MASK);
+      uint8_t result[4];
+      FlashDriverError_t rc = readFlashResource(0, DATA_ADDRESS_FLAG|0xFC, result);
+      if (rc != 0) {
+         console.write("IFR read failed, rc=").writeln(rc);
+         return false;
+      }
+      uint8_t flexNvmPartitionSize = result[0];
+      uint8_t eepromDatSetSize     = result[1];
 
-      //   printf("FTFL->FCNFG = 0x%02X\n", FTFL->FCNFG);
-      //   printf("FTFL->FCNFG.FTFL_FCNFG_RAMRDY = %s\n", FTFL->FCNFG&FTFL_FCNFG_RAMRDY_MASK?"true":"false");
-      //   printf("FTFL->FCNFG.FTFL_FCNFG_EEERDY = %s\n", FTFL->FCNFG&FTFL_FCNFG_EEERDY_MASK?"true":"false");
+      console.write("FlexNVM partition code = ").writeln(flexNvmPartitionSize, Radix_16);
+      console.write("EEPROM data set size   = ").writeln(eepromDatSetSize, Radix_16);
 
-      //   uint8_t result[4];
-      //   FlashDriverError_t rc = readFlashResource(0, DATA_ADDRESS_FLAG|0xFC, result);
-      //   if (rc != 0) {
-      ////      printf("IFR read failed, rc=%d\n", rc);
-      //      return false;
-      //   }
-      //   uint8_t flexNvmPartitionSize = result[0];
-      //   uint8_t eepromDatSetSize     = result[1];
-
-      //   printf("FlexNVM partition code = 0x%02X\n", flexNvmPartitionSize);
-      //   printf("EEPROM data set size   = 0x%02X\n", eepromDatSetSize);
-
-      //      return (FTFL->FCNFG&FTFL_FCNFG_EEERDY_MASK);
+      return (flashController().FCNFG&FTFL_FCNFG_EEERDY_MASK);
+#endif
    }
 
    /**
-    * Wait until flash is ready.\n
+    * Wait until flash is ready.
     * Any flash operations will have completed.
     *
     * @return true => OK, false => timeout
     */
    static bool waitForFlashReady() {
       for(int timeout=0; timeout<100000; timeout++) {
-         if ((FTFL->FSTAT&FTFL_FSTAT_CCIF_MASK) != 0) {
+         if ((flashController().FSTAT&FTFL_FSTAT_CCIF_MASK) != 0) {
             return true;
          }
       }
       return false;
    }
 
+   /**
+    * Check if flash operations are available.
+    * This will check if the processor is in the correct mode for flash operations.
+    *
+    * @return true  => OK
+    * @return false => Processor not in correct mode
+    */
+   static bool isFlashAvailable() {
+      return (Smc::getStatus() == SmcStatus_RUN);
+   }
+
+   /**
+    * Waits until the current flash operation is complete with run mode check.
+    * This is used to wait until a FlexRAM write has completed.
+    *
+    * @return true  => Operation complete and FlexRAM idle
+    * @return false => timeout or flash not available
+    */
+   static bool waitUntilFlexIdle() {
+      usbdm_assert(isFlashAvailable(), "Flash use in unsuitable run mode");
+      return
+            isFlashAvailable() &&
+            waitForFlashReady();
+   }
+
+   /**
+    * Enable interrupts in NVIC
+    */
+   static void enableNvicInterrupts() {
+      NVIC_EnableIRQ(irqNums[0]);
+   }
+
+   /**
+    * Enable and set priority of interrupts in NVIC
+    * Any pending NVIC interrupts are first cleared.
+    *
+    * @param[in]  nvicPriority  Interrupt priority
+    */
+   static void enableNvicInterrupts(uint32_t nvicPriority) {
+      enableNvicInterrupt(irqNums[0], nvicPriority);
+   }
+
+   /**
+    * Disable interrupts in NVIC
+    */
+   static void disableNvicInterrupts() {
+      NVIC_DisableIRQ(irqNums[0]);
+   }
+
+   /**
+    * Enable interrupts in NVIC
+    * Any pending NVIC interrupts are first cleared.
+    */
+   static void enableNvicCollisionInterrupts() {
+      NVIC_EnableIRQ(irqNums[1]);
+   }
+
+   /**
+    * Enable and set priority of interrupts in NVIC
+    * Any pending NVIC interrupts are first cleared.
+    *
+    * @param[in]  nvicPriority  Interrupt priority
+    */
+   static void enableNvicCollisionInterrupts(uint32_t nvicPriority) {
+      enableNvicInterrupt(irqNums[1], nvicPriority);
+   }
+
+   /**
+    * Disable interrupts in NVIC
+    */
+   static void disableNvicCollisionInterrupts() {
+      NVIC_DisableIRQ(irqNums[1]);
+   }
+
 private:
    /**
-    * Program a phrase to Flash memory
+    * Program a phrase to Flash memory.
     *
     * @param[in]  data       Location of data to program
     * @param[out] address    Memory address to program - must be phrase boundary
@@ -206,7 +316,7 @@ private:
    static FlashDriverError_t programPhrase(const uint8_t *data, uint8_t *address);
 
    /**
-    * Erase sector of Flash memory
+    * Erase sector of Flash memory.
     *
     * @param[in]  address    Memory address to erase - must be sector boundary
     *
@@ -216,7 +326,7 @@ private:
 
 public:
    /**
-    * Program a range of bytes to Flash memory
+    * Program a range of bytes to Flash memory.
     *
     * @param[in]  data       Location of data to program
     * @param[out] address    Memory address to program - must be phrase boundary
@@ -227,22 +337,22 @@ public:
    static FlashDriverError_t programRange(const uint8_t *data, uint8_t *address, uint32_t size);
 
    /**
-    * Erase a range of Flash memory
+    * Erase a range of Flash memory.
     *
-    * @param[out] address    Memory address to start erasing - must be sector boundary
+    * @param[in]  address    Memory address to start erasing - must be sector boundary
     * @param[in]  size       Size of range (in bytes) to erase - must be multiple of sector size
     *
     * @return Error code
     */
    static FlashDriverError_t eraseRange(uint8_t *address, uint32_t size);
    /**
-    * Mass erase entire Flash memory
+    * Mass erase entire Flash memory.
     */
    static void eraseAll();
 };
 
 /**
- * Class to wrap a scalar variable allocated within the FlexRam area\n
+ * Class to wrap a scalar variable allocated within the FlexRam area.
  * Size is limited to 1, 2 or 4 bytes.
  *
  * Writing to the variable triggers an EEPROM update.\n
@@ -259,11 +369,11 @@ public:
 template <typename T>
 class Nonvolatile {
 
-   static_assert((sizeof(T) == 1)||(sizeof(T) == 2)||(sizeof(T) == 4), "T must be 1,2 or 4 bytes in size");
+   static_assert((sizeof(T) == 1)||(sizeof(T) == 2)||(sizeof(T) == 4), "Size of non-volatile object must be 1, 2 or 4 bytes in size");
 
 private:
    /**
-    * Data value in FlexRAM
+    * Data value in FlexRAM.
     *
     * FlexRAM required data to be aligned according to its size.\n
     * Be careful how you order variables otherwise space will be wasted
@@ -273,76 +383,78 @@ private:
 
 public:
    /**
-    * Assign to underlying type\n
+    * Assign to underlying type.
     * This adds a wait for the Flash to be updated
     *
     * @param[in]  data The data to assign
     */
-   void operator=(const Nonvolatile &data ) {
-      this->data = data;
-      Flash::waitForFlashReady();
+   void operator=(const Nonvolatile<T> &data ) {
+      this->data = (T)data;
+      Flash::waitUntilFlexIdle();
    }
    /**
-    * Assign to underlying type\n
+    * Assign to underlying type.
     * This adds a wait for the Flash to be updated
     *
     * @param[in]  data The data to assign
     */
    void operator=(const T &data ) {
       this->data = data;
-      Flash::waitForFlashReady();
+      Flash::waitUntilFlexIdle();
    }
    /**
-    * Increment underlying type\n
+    * Increment underlying type.
     * This adds a wait for the Flash to be updated
     *
     * @param[in]  change The amount to increment
     */
-   void operator+=(const Nonvolatile &change ) {
-      this->data += change;
-      Flash::waitForFlashReady();
+   void operator+=(const Nonvolatile<T> &change ) {
+      this->data += (T)change;
+      Flash::waitUntilFlexIdle();
    }
    /**
-    * Increment underlying type\n
+    * Increment underlying type.
     * This adds a wait for the Flash to be updated
     *
     * @param[in]  change The amount to increment
     */
    void operator+=(const T &change ) {
       this->data += change;
-      Flash::waitForFlashReady();
+      Flash::waitUntilFlexIdle();
    }
    /**
-    * Decrement underlying type\n
+    * Decrement underlying type.
     * This adds a wait for the Flash to be updated
     *
     * @param[in]  change The amount to increment
     */
-   void operator-=(const Nonvolatile &change ) {
-      this->data -= change;
-      Flash::waitForFlashReady();
+   void operator-=(const Nonvolatile<T> &change ) {
+      this->data -= (T)change;
+      Flash::waitUntilFlexIdle();
    }
    /**
-    * Decrement underlying type\n
+    * Decrement underlying type.
     * This adds a wait for the Flash to be updated
     *
     * @param[in]  change The amount to increment
     */
    void operator-=(const T &change ) {
       this->data -= change;
-      Flash::waitForFlashReady();
+      Flash::waitUntilFlexIdle();
    }
    /**
-    * Return the underlying object - read-only!
+    * Return the underlying object - <b>read-only</b>.
+    *
+    * @return underlying object
     */
    operator T() const {
-      Flash::waitForFlashReady();
+      Flash::waitUntilFlexIdle();
       return data;
    }
 };
 
 /**
- * Class to wrap an array of scalar variables allocated to the FlexRam area
+ * Class to wrap an array of scalar variables allocated to the FlexRam area.
  *
  * Element size is limited to 1, 2 or 4 bytes.
  *
@@ -367,7 +479,7 @@ private:
    using TArray = T[dimension];
    using TPtr   = const T(*);
 
-   /** Array of elements in FlexRAM
+   /** Array of elements in FlexRAM.
     *
     *  FlexRAM required data to be aligned according to its size.\n
     *  Be careful how you order variables otherwise space will be wasted
@@ -377,7 +489,7 @@ private:
 
 public:
    /**
-    * Assign to underlying array
+    * Assign to underlying array.
     *
     * @param[in]  other TArray to assign from
     *
@@ -386,26 +498,30 @@ public:
    void operator=(const TArray &other ) {
       for (int index=0; index<dimension; index++) {
          data[index] = other[index];
-         Flash::waitForFlashReady();
+         Flash::waitUntilFlexIdle();
       }
    }
 
    /**
-    * Assign to underlying array
+    * Assign to underlying array.
     *
     * @param[in]  other NonvolatileArray to assign from
     *
     * This adds a wait for the Flash to be updated after each element is assigned
     */
    void operator=(const NonvolatileArray &other ) {
+      if (this == &other) {
+         // Identity check
+         return;
+      }
       for (int index=0; index<dimension; index++) {
          data[index] = other[index];
-         Flash::waitForFlashReady();
+         Flash::waitUntilFlexIdle();
       }
    }
 
    /**
-    * Assign to underlying array
+    * Assign to underlying array.
     *
     * @param[in]  other NonvolatileArray to assign to
     *
@@ -418,7 +534,7 @@ public:
    }
 
    /**
-    * Return a reference to the underlying array element - read-only!
+    * Return a reference to the underlying array element - read-only.
     *
     * @param[in]  index Index of element to return
     *
@@ -429,31 +545,31 @@ public:
    }
 
    /**
-    * Return a pointer to the underlying array - read-only!
+    * Return a pointer to the underlying array - read-only.
     */
    operator TPtr() const {
       return data;
    }
 
    /**
-    * Set an element of the array to the value provided
+    * Set an element of the array to the value provided.
     *
     * @param[in]  index Array index of element to change
     * @param[in]  value Value to initialise array elements to
     */
    void set(int index, T value) {
       data[index] = value;
-      Flash::waitForFlashReady();
+      Flash::waitUntilFlexIdle();
    }
    /**
-    * Set all elements of the array to the value provided
+    * Set all elements of the array to the value provided.
     *
     * @param[in]  value Value to initialise array elements to
     */
    void set(T value) {
       for (int index=0; index<dimension; index++) {
          data[index] = value;
-         Flash::waitForFlashReady();
+         Flash::waitUntilFlexIdle();
       }
    }
 };

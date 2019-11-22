@@ -11,11 +11,14 @@
 
 // Note: Most objects are stateless static objects declared in Configure.h
 
+/** Mutex to protect Interactive and Remote control */
+CMSIS::Mutex interactiveMutex;
+
 /** SPI used for LCD and Thermocouples */
 USBDM::Spi0 spi;
 
 /** LCD */
-LCD_ST7920 lcd{spi, lcd_cs_num};
+LCD_ST7920 lcd{spi, lcd_cs};
 
 /** PWM for heater & oven fan */
 ZeroCrossingPwm <Heater, HeaterLed, OvenFan, OvenFanLed, Vmains> ovenControl{fanKickTime};
@@ -28,7 +31,8 @@ SwitchDebouncer<F1Button, F2Button, F3Button, F4Button, SButton> buttons{};
  *
  * @param[in] dutyCycle Controls the Heater/Fan
  */
-inline void outPutControl(float dutyCycle) {
+void outPutControl(float dutyCycle) {
+//   PulseTp tp;
    int heaterDutycycle;
    int fanDutycycle;
 
@@ -55,7 +59,8 @@ inline void outPutControl(float dutyCycle) {
  * @return Averaged oven temperature
  */
 float getTemperature() {
-   return temperatureSensors.getTemperature();
+   temperatureSensors.updateMeasurements();
+   return temperatureSensors.getLastTemperature();
 }
 
 /** PID controller */
@@ -67,7 +72,3 @@ TemperatureSensors temperatureSensors{};
 /** Monitor for case temperature */
 CaseTemperatureMonitor<CaseFan> caseTemperatureMonitor{temperatureSensors};
 
-/**
- * Mutex to protect Interactive and Remote control
- */
-CMSIS::Mutex interactiveMutex;

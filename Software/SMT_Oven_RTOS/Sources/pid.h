@@ -5,7 +5,6 @@
  *  Created on: 10 Jul 2016
  *      Author: podonoghue
  */
-
 #ifndef PROJECT_HEADERS_PID_H_
 #define PROJECT_HEADERS_PID_H_
 
@@ -31,25 +30,25 @@ template<Pid::InFunction inputFn, Pid::OutFunction outputFn>
 class Pid_T : private Pid, private CMSIS::TimerClass {
 
 private:
-   const double interval;     //! Interval for sampling
-   const double outMin;       //! Minimum limit for output
-   const double outMax;       //! Maximum limit for output
+   const double interval;     //!< Interval for sampling
+   const double outMin;       //!< Minimum limit for output
+   const double outMax;       //!< Maximum limit for output
 
-   double kp;                 //! Proportional Tuning Parameter
-   double ki;                 //! Integral Tuning Parameter
-   double kd;                 //! Derivative Tuning Parameter
+   double kp;                 //!< Proportional Tuning Parameter
+   double ki;                 //!< Integral Tuning Parameter
+   double kd;                 //!< Derivative Tuning Parameter
 
-   bool   enabled;            //! Enable for controller
+   bool   enabled;            //!< Enable for controller
 
-   double integral;           //! Integral accumulation term
+   double integral;           //!< Integral accumulation term
 
-   double lastInput;          //! Last input sample
-   double currentInput;       //! Current input sample
-   double currentOutput;      //! Current output
-   double setpoint;           //! Set-point for controller
-   double currentError;       //! Current error calculation
+   double lastInput;          //!< Last input sample
+   double currentInput;       //!< Current input sample
+   double currentOutput;      //!< Current output
+   double setpoint;           //!< Set-point for controller
+   double currentError;       //!< Current error calculation
 
-   unsigned tickCount = 0;    //! Time in ticks since last enabled
+   unsigned tickCount = 0;    //!< Time in ticks since last enabled
 
 public:
    /**
@@ -215,11 +214,14 @@ private:
     * Executed at \ref interval by Timer callback
     */
    void callback() override {
+//      PulseTp tp;
+
       if(!enabled) {
          return;
       }
 
       tickCount++;
+//      USBDM::console.writeln(tickCount);
 
       // Update input samples & error
       lastInput    = currentInput;
@@ -245,7 +247,6 @@ private:
       // Update output
       outputFn(currentOutput);
    }
-
 };
 
 #endif // PROJECT_HEADERS_PID_H_

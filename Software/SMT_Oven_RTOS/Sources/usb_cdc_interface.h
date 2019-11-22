@@ -33,25 +33,25 @@ private:
    static constexpr uint8_t CDC_LINE_CONTROL_RTS_MASK = 1<<1;
 
 protected:
-   using simpleCallbak = bool (*)();
+
+   /** Type for call-back */
+   using SimpleCallback = bool (*)();
 
    /**
     * Wrapper for initialised static variable
     *
     * @return Reference to notifyUsbIn function pointer
     */
-   static simpleCallbak &notifyUsbInPtr() {
-      static simpleCallbak cb = nullptr;
+   static SimpleCallback &notifyUsbInPtr() {
+      static SimpleCallback cb = nullptr;
       return cb;
    }
 
    /**
-    * Wrapper for initialised static variable
-    *
-    * @return Reference to notifyUsbIn function pointer
+    * Notify USB that transmit data (response) is available
     */
    static void notifyUsbIn() {
-      simpleCallbak cb = notifyUsbInPtr();
+      SimpleCallback cb = notifyUsbInPtr();
       if (cb != nullptr) {
          cb();
       }
@@ -73,7 +73,7 @@ public:
     *
     * @param cb The function to call to notify the USB In interface that new data is available
     */
-   static void setUsbInNotifyCallback(simpleCallbak cb) {
+   static void setUsbInNotifyCallback(SimpleCallback cb) {
       notifyUsbInPtr() = cb;
    }
 
@@ -94,7 +94,7 @@ public:
     * @param size Amount of data
     * @param buff Buffer for data
     *
-    * @note the Data is volatile so should be processed or saved immediately.
+    * @note The data is volatile so should be processed or saved immediately.
     */
    static void putData(int size, const uint8_t *buff) {
       (void)size;
@@ -131,7 +131,7 @@ public:
     *
     * @param lineCoding Line coding information
     */
-   static void setLineCoding(LineCodingStructure * const lineCoding) {
+   static void setLineCoding(LineCodingStructure *const lineCoding) {
       getLineCoding() = *lineCoding;
    }
 
@@ -159,7 +159,6 @@ public:
    static void sendBreak(uint16_t length) {
       (void)length;
    }
-
 }; // class CDC_interface
 
 }; // end namespace USBDM

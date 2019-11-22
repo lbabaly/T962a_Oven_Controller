@@ -7,7 +7,6 @@
  *      Author: podonoghue
  ============================================================================
  */
-#include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include "cmsis.h"
@@ -26,6 +25,7 @@
 #include "usb.h"
 #include "utilities.h"
 #include "EditProfile.h"
+#include "i2c.h"
 
 class profilesMenu {
 
@@ -69,27 +69,41 @@ public:
    }
 };
 
+using namespace USBDM;
+
 void initialise() {
+   using namespace USBDM;
+
    Buzzer::init();
    OvenFanLed::init();
    HeaterLed::init();
-   Spare::enable();
-   Spare::setDutyCycle(0);
+   Spare::Ftm::enable();
+   Spare::setDutyCycle(0U);
+   ovenControl.initialise();
+   Tp1::setOutput(PinDriveStrength_High);
+   lcd.setFloatFormat(1,Padding_LeadingSpaces,3);
 }
 
 int main() {
+
+   console.writeln("Starting Oven");
+
+   console.write("Main thread priority = ").writeln(CMSIS::Thread::getMyPriority());
+   CMSIS::Thread::setMyPriority(osPriorityHigh);
+   console.write("Main thread lowered priority = ").writeln(CMSIS::Thread::getMyPriority());
+
    initialise();
 
-   USBDM::mapAllPins();
+   Usb0::initialise();
 
-   if (USBDM::getError() != USBDM::E_NO_ERROR) {
+   mapAllPins();
+
+   if (getError() != E_NO_ERROR) {
       char buff[100];
       lcd.clear();
-      lcd.printf("Error in initialisation \n  %s\n", USBDM::getErrorMessage());
-      lcd.putString(buff);
+      lcd.write("Error in initialisation \n  ").writeln(getErrorMessage());
+      console.write(buff);
    }
-
-   USBDM::Usb0::initialise();
 
    MainMenu::run();
 

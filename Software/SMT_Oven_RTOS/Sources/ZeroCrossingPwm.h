@@ -9,6 +9,7 @@
 #define HEADERS_ZEROCROSSINGPWM_H_
 
 #include "flash.h"
+#include "cmp.h"
 
 /**
  * Simple zero-crossing PWM for oven fan and heater controlled by zero-crossing SSDs
@@ -17,18 +18,18 @@
  *
  * @tparam Heater     USBDM::Gpio controlling the oven heater SSD
  * @tparam HeaterLed  USBDM::Gpio controlling the oven heater LED
- * @tparam Fan        USBDM::Gpio controlling the oven fan SSD
+ * @tparam OvenFan    USBDM::Gpio controlling the oven fan SSD
  * @tparam FanLed     USBDM::Gpio controlling the oven fan LED
  * @tparam Vmains     USBDM::Cmp used for mains sensing
  */
-template<typename Heater, typename HeaterLed, typename Fan, typename FanLed, typename Vmains>
+template<typename Heater, typename HeaterLed, typename OvenFan, typename FanLed, typename Vmains>
 class ZeroCrossingPwm {
 
 private:
    /** Duty cycle for Heater */
    static int  heaterDutycycle;
 
-   /** Duty cycle for Fan */
+   /** Duty cycle for OvenFan */
    static int  fanDutycycle;
 
    /** Count down for fan kick */
@@ -44,7 +45,7 @@ private:
     * Function is called on zero-crossings of the mains.
     * Implements a simple PWM with variable period (~20ms - ~1s @50Hz mains).
     */
-   static void callbackFunction(int status) {
+   static void callbackFunction(USBDM::CmpStatus status) {
       (void)status;
 
       // Keeps track of heater drive
@@ -61,9 +62,9 @@ private:
          cycleCount = 0;
       }
       //      Heater::toggle();
-      //      Fan::toggle();
+      //      OvenFan::toggle();
       Heater::write(cycleCount<heaterDutycycle);
-      Fan::write(cycleCount<fanDutycycle);
+      OvenFan::write(cycleCount<fanDutycycle);
 #else
       // Variable period PWM
       int wholePart;
@@ -77,7 +78,7 @@ private:
       if (fanKick>0) {
          // Still kicking
          fanKick--;
-         Fan::set();
+         OvenFan::set();
          FanLed::on();
       }
       else {
@@ -85,7 +86,7 @@ private:
          fanDutycount += fanDutycycle;
          wholePart = fanDutycount/100;
          fanDutycount -= 100*wholePart;
-         Fan::write(wholePart>0);
+         OvenFan::write(wholePart>0);
          FanLed::write(wholePart>0);
       }
 #endif
@@ -98,29 +99,33 @@ public:
     * @param fanKickTime Non-volatile variable used to control the fan kick time applied when starting
     */
    ZeroCrossingPwm(const USBDM::Nonvolatile<int> &fanKickTime) : fanKickTime(fanKickTime) {
-      initialise();
+//      initialise();
    }
 
-private:
    static void initialise() {
+      using namespace USBDM;
+
       heaterDutycycle = 0;
       fanDutycycle    = 0;
       HeaterLed::init();
       Heater::setOutput();
       Heater::low();
       FanLed::init();
-      Fan::setOutput();
-      Fan::low();
+      OvenFan::setOutput();
+      OvenFan::low();
 
       /**
        * Set up comparator to generate events on mains zero-crossings
        */
-      Vmains::enable();
+      Vmains::configure(
+            CmpPower_HighSpeed,
+            CmpHysteresis_3,
+            CmpPolarity_Noninverted);
+      Vmains::configureDac(32, CmpDacSource_Vdda);
+      Vmains::selectInputs(Cmp0Input_CmpIn1,Cmp0Input_DacRef);
       Vmains::setCallback(callbackFunction);
-      Vmains::enableRisingEdgeInterrupts();
-      Vmains::enableFallingEdgeInterrupts();
-      Vmains::setDacLevel(32, 1, true);
-      Vmains::selectInputs(1,7);
+      Vmains::enableInterrupts(CmpInterrupt_Both);
+      Vmains::enableNvicInterrupts(NvicPriority_Normal);
    }
 
 public:
@@ -170,11 +175,11 @@ public:
    }
 };
 
-template<typename Heater, typename HeaterLed, typename Fan, typename FanLed, typename Vmains>
-int  ZeroCrossingPwm<Heater, HeaterLed, Fan, FanLed, Vmains>::heaterDutycycle = 0;
-template<typename Heater, typename HeaterLed, typename Fan, typename FanLed, typename Vmains>
-int  ZeroCrossingPwm<Heater, HeaterLed, Fan, FanLed, Vmains>::fanDutycycle = 0;
-template<typename Heater, typename HeaterLed, typename Fan, typename FanLed, typename Vmains>
-int  ZeroCrossingPwm<Heater, HeaterLed, Fan, FanLed, Vmains>::fanKick = 0;
+template<typename Heater, typename HeaterLed, typename OvenFan, typename FanLed, typename Vmains>
+int  ZeroCrossingPwm<Heater, HeaterLed, OvenFan, FanLed, Vmains>::heaterDutycycle = 0;
+template<typename Heater, typename HeaterLed, typename OvenFan, typename FanLed, typename Vmains>
+int  ZeroCrossingPwm<Heater, HeaterLed, OvenFan, FanLed, Vmains>::fanDutycycle = 0;
+template<typename Heater, typename HeaterLed, typename OvenFan, typename FanLed, typename Vmains>
+int  ZeroCrossingPwm<Heater, HeaterLed, OvenFan, FanLed, Vmains>::fanKick = 0;
 
 #endif /* HEADERS_ZEROCROSSINGPWM_H_ */

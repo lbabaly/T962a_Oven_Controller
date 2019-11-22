@@ -1,5 +1,5 @@
 /**
- * @file     USBDM_Documentation.h (180.ARM_Peripherals/Project_Headers/USBDM_Documentation.h)
+ * @file     USBDM_Documentation.h (180.ARM_Peripherals/Project_Headers/USBDM_Documentation_MK.h)
  * @brief    USBDM Documentation
  */
  
@@ -11,21 +11,99 @@
 \tableofcontents
 Table of Contents
  - \ref ADCExamples \n
+ - \ref Console \n
  - \ref DMAExamples \n
  - \ref FTMExamples \n
  - \ref GPIOExamples \n
+ - \ref I2CExamples \n
  - \ref LPTMRExamples \n
  - \ref PDBExamples \n
  - \ref PinSummary  \n
  - \ref PITExamples \n
+ - \ref SPIExamples \n
 
-@page DMAExamples  Direct Memory Access Controller (DMAC)
+@page I2CExamples  I2C interface
+
+Convenience template for SPI. Uses the following classes:\n
+<ul>
+<li>USBDM::I2cBase_T < Info >
+<li>USBDM::I2c
+<ul>
+<li>USBDM::I2c0
+<li>USBDM::I2c1
+</ul>
+</ul>
+
+<b>Examples</b>\n
+ - @ref i2c-example.cpp
+
+@page SPIExamples  SPI interface
+
+Convenience template for SPI. Uses the following classes:\n
+<ul>
+<li>USBDM::SpiBase_T < Info >
+<li>USBDM::Spi
+<ul>
+<li>USBDM::Spi0
+<li>USBDM::Spi1
+</ul>
+</ul>
+
+<b>Examples</b>\n
+ - @ref spi-example.cpp
+
+@page Console  Console and UART interface
+
+Convenience template for UART. Uses the following classes:\n
+<ul>
+<li>USBDM::Uart_T < Info >
+<li>USBDM::UartBuffered_T < Info, rxSize, txSize >
+<ul>
+<li>USBDM::Console
+<li>USBDM::Uart0
+<li>USBDM::Uart1
+<li>USBDM::Uart
+</ul>
+</ul>
+
+<b>Examples</b>\n
+ - @ref console-example.cpp
+
+<b>Usage</b>
+ @code
+
+   console.writeln("Hello World");
+
+   int value;
+   console.write("Enter value: ").readln(value);
+   console.write("Value =").writeln(value);
+
+   console<<"Enter value: ">>value<<EndOfLine;
+   console<<"Value ="<<value<<EndOfLine;
+
+   // I/O with error checks
+   if (console.write("Number: ").readln(integer).isError()) {
+      console.writeln("Opps");
+   }
+   else {
+      console.writeln(integer);
+   }
+
+   // String buffer example
+   // Used to write formatted strings
+   char buff[100];
+   StringFormatter sf(buff, sizeof(buff));
+   sf.write("This is a string and number(").write(3.3).write(") written to a char buffer (string)");
+   console.writeln(sf.toString());
+ @endcode
+
+@page DMAExamples  Direct Memory Access Controller
 
 Convenience template for DMAC. Uses the following classes:\n
 <ul>
 <li>USBDM::DmaTcd \n
 <li>USBDM::DmaMux_T < DmaMuxInfo > \n
-<li>USBDM::Dma_T < DmaInfo > \n
+<li>USBDM::DmaBase_T < DmaInfo > \n
 </ul>
 
 This template is an interface for the Direct Memory Access Controller hardware. \n
@@ -39,6 +117,11 @@ This is a template class with static methods.\n
 
 <b>Examples</b>\n
  - @ref dma-memory-example.cpp
+ - @ref dma-memory-template-example.cpp
+ - @ref dma-spi-example.cpp
+ - @ref dma-uart-example-mk20.cpp
+ - @ref dma-uart-example-mk22f.cpp
+ - @ref dma-uart-example-mk28f.cpp
 
  @page GPIOExamples  General Purpose Input Output
 
@@ -46,7 +129,7 @@ This is a template class with static methods.\n
 
 Convenience template for LPTMR. Uses the following classes:\n
 <ul>
-<li>USBDM::Lptmr_T < Info > \n
+<li>USBDM::LptmrBase_T < Info > \n
 </ul>
 
 This template is an interface for the Low Power Timer hardware. \n
@@ -64,11 +147,23 @@ This is a template class with static methods.\n
 
 Convenience template for GPIO pins. Uses the following classes:\n
 <ul>
-<li>USBDM::GpioBase_T <clockMask, pcrAddress, gpioAddress, bitNum, polarity> \n
-<li>USBDM::Gpio_T <Info, bitNum, polarity>\n
-<li>USBDM::GpioA <bitNum, polarity>, USBDM::GpioB <bitNum, polarity> etc.\n
-<li>USBDM::Field_T <Info, left, right>\n
-<li>USBDM::GpioAField <left, right>, USBDM::GpioBField <left, right> etc.\n
+<li>USBDM::GpioBase_T &lt;clockMask, portAddress, gpioAddress, bitNum, polarity&gt; \n
+<li>USBDM::Gpio_T &lt;Info, bitNum, polarity&gt;\n
+<ul>
+<li>USBDM::GpioA &lt;bitNum, polarity&gt;
+<li>USBDM::GpioB &lt;bitNum, polarity&gt;
+<li>USBDM::GpioC &lt;bitNum, polarity&gt;
+<li>USBDM::GpioD &lt;bitNum, polarity&gt;
+<li>USBDM::GpioE &lt;bitNum, polarity&gt;
+</ul>
+<li>USBDM::Field_T &lt;Info, left, right, polarity&gt;\n
+<ul>
+<li>USBDM::GpioAField &lt;left, right, polarity&gt;
+<li>USBDM::GpioBField &lt;left, right, polarity&gt;
+<li>USBDM::GpioCField &lt;left, right, polarity&gt;
+<li>USBDM::GpioDField &lt;left, right, polarity&gt;
+<li>USBDM::GpioEField &lt;left, right, polarity&gt;
+</ul>
 </ul>
 
 This template is an interface for the general purpose I/O pin hardware. \n
@@ -153,7 +248,7 @@ This is a template class with static methods.\n
    Gpio::setDriveMode(PinOpenDrain);
    Gpio::high();
    if (Gpio::readState() != Gpio::read()) {
-      printf("Open-drain pin is being held low\n");
+      console.writeln("Open-drain pin is being held low");
    }
 
    // Dynamically change pin to input
@@ -173,9 +268,13 @@ This is a template class with static methods.\n
 
 Convenience template for ADC inputs. Use the following classes:\n
 <ul>
-<li>USBDM::AdcBase_T\n
-<li>USBDM::AdcChannel_T\n
-<li>USBDM::AdcDiffChannel_T\n
+<li>USBDM::AdcBase_T
+<ul>
+<li>USBDM::Adc0
+<li>USBDM::Adc1
+</ul>
+<li>USBDM::AdcBase_T::Channel
+<li>USBDM::AdcBase_T::DiffChannel
 </ul>
 This template is an interface for the ADC input pins. \n
 
@@ -201,19 +300,25 @@ This is a template class with static methods.\n
    // This allows access to USBDM classes and methods without the USBDM:: prefix.
    using namespace USBDM;
 
+   // ADC being used (for shared settings)
+   using Adc         = Adc0;
+
    // Use ADC0 channel 6 as ADC input (ADC_IN6)
    using AdcChannel = USBDM::Adc0Channel<6>;
 
-   // Set ADC resolution to 16 bits
-   AdcChannel::setResolution(AdcResolution_16bit_se);
+   // Initially configure ADC for resolution of 16 bits with default settings
+   Adc::configure(AdcResolution_16bit_se);
 
+   // Calibrate before use
+   Adc::calibrate();
+   
    // Set ADC averaging to 4 samples
-   AdcChannel::setAveraging(AdcAveraging_4);
+   Adc::setAveraging(AdcAveraging_4);
 
    // Read ADC value
    uint32_t value = AdcChannel::readAnalogue();
 
-   printf("ADC measurement = %lu\n", value);
+   console.write("ADC measurement = ").writeln(value);
  @endcode
 
  <b>Usage - Differential measurement</b>
@@ -222,34 +327,54 @@ This is a template class with static methods.\n
    // This allows access to USBDM classes and methods without the USBDM:: prefix.
    using namespace USBDM;
 
+   // ADC being used (for shared settings)
+   using Adc         = Adc0;
+
    // Use channel 0 as ADC differential input (ADC_DM0, ADC_DP0)
    using Adc1_diff0 = USBDM::Adc0DiffChannel<0>;
 
-   // Set ADC resolution to 11 bits differential
-   Adc1_diff0::setResolution(AdcResolution_11bit_diff);
+   // Initially configure ADC for resolution of 11 bits differential with default settings
+   Adc::configure(AdcResolution_11bit_diff);
 
+   // Calibrate before use
+   Adc::calibrate();
+   
    // Set ADC averaging to 4 samples
-   Adc1_diff0::setAveraging(AdcAveraging_4);
+   Adc::setAveraging(AdcAveraging_4);
 
    // Read signed differential ADC value
    int32_t value = Adc1_diff0::readAnalogue();
 
-   printf("ADC measurement = %ld\n", value);
+   console.write("ADC measurement = ").writeln(value);
  @endcode
 
 @page FTMExamples Flexible Timer Module
 
 Convenience template for FTM hardware.
 The interface is divided into a number of templates:
-- USBDM::FtmBase_T Representing the shared FTM functionality.
-- USBDM::QuadEncoder_T Representing a FTM operating as a quadrature encoder.
-- USBDM::FtmChannel_T Representing individual channels of a single FTM.
-
+<ul>
+<li>USBDM::FtmBase_T Representing the shared FTM functionality.
+<ul>
+<li>USBDM::Ftm0
+<li>USBDM::Ftm1
+</ul>
+<li>USBDM::FtmQuadDecoder_T Representing a FTM operating as a quadrature encoder.
+<ul>
+<li>USBDM::FtmQuadDecoder1
+</ul>
+<li>USBDM::FtmBase_T::Channel Representing individual channels of a single FTM.
+<ul>
+<li>USBDM::Ftm0::Channel
+<li>USBDM::Ftm1::Channel
+</ul>
+</ul>
 It provides:\n
-- Static pin mapping in conjunction with the configuration settings.
-- Setting the FTM period in ticks or seconds
-- Setting the channel duty cycle in percentage
-- Interrupt driven operation is also supported through a callback if <b>enabled in the configuration</b>.
+<ul>
+<li>Static pin mapping in conjunction with the configuration settings.
+<li>Setting the FTM period in ticks or seconds
+<li>Setting the channel duty cycle in percentage
+<li>Interrupt driven operation is also supported through a callback if <b>enabled in the configuration</b>.
+</ul>
 
 This is a template class with static methods.\n
 <em>It cannot be instantiated.</em>
@@ -305,33 +430,38 @@ This is a template class with static methods.\n
 
    // Use FTM1 as the quadrature encoder
    // Not all FTMs support this mode
-   using QuadEncoder = QuadEncoder1;
+   using QuadDecoder = QuadDecoder1;
 
    // Enable encoder
-   QuadEncoder::enable();
+   QuadDecoder::enable();
 
    // Set pin filters
-   QuadEncoder::enableFilter(15);
+   QuadDecoder::enableFilter(15);
 
    // Reset position to zero
    // Movement will be relative to this position
-   QuadEncoder::resetPosition();
+   QuadDecoder::resetPosition();
 
    // Set up callback for quadrature overflow or underflow
-   QuadEncoder::setTimerOverflowCallback(callBack);
-   QuadEncoder::enableTimerOverflowInterrupts();
-   QuadEncoder::enableNvicInterrupts();
+   QuadDecoder::setTimerOverflowCallback(callBack);
+   QuadDecoder::enableTimerOverflowInterrupts();
+   QuadDecoder::enableNvicInterrupts();
 
    for (;;) {
       // Report position
-      printf("Shaft position = %d\n\r", QuadEncoder::getPosition());
+      console.write("Shaft position = ").writeln(QuadDecoder::getPosition());
    }
 @endcode
 
 @page PITExamples Programmable Interrupt Timer Module
 
-Convenience template for PIT hardware. Based on USBDM::Pit_T.\n
-
+Convenience template for PIT hardware. \n
+Uses the following classes:
+<ul>
+<li> USBDM::PitBase_T &lt;Info&gt;
+<li> USBDM::Pit
+<li> USBDM::PitChannel &lt;channel&gt;
+</ul>
 It provides:\n
 - Static pin mapping in conjunction with the configuration settings.
 - Setting the PIT channel period in seconds
@@ -413,20 +543,36 @@ This is a template class with static methods.\n
 @endcode
 
 @page Notes Notes
-  - enable()      Enables clock and configures pins (if present)
-  - configure()   As above, enable() + initialises according to Configure.usbdmProject\n
-                  May have defaulted parameters to do custom configuration.
-  - disable()     Disables the peripheral
+  - enable()            Enables clock and configures pins (if any configured in Configure.usbdmProject)
+  - configureAllPins()  Configures all pins associated with the peripheral
+  - defaultConfigure()  enable() + initialises according to Configure.usbdmProject\n
+                        May have defaulted parameters to do custom configuration.
+  - disable()           Disables the peripheral
 
 @example analogue-comparison-example.cpp
 @example analogue-diff-example.cpp
+@example analogue-example.cpp
 @example analogue-interrupt-example.cpp
 @example analogue-joystick-example.cpp
-@example cmp.cpp
+@example clkout-example.cpp
+@example cmp-example.cpp
+@example cmt-example.cpp
+@example cmt-sirc-example.cpp
+@example console-example.cpp
+@example crc-example.cpp
+@example dac-example.cpp
 @example digital-example1.cpp
 @example digital-example2.cpp
+@example digital-interrupt-example.cpp
+@example digital-rotary-encoder-example.cpp
 @example dma-memory-example.cpp
-@example flash_programming_example.cpp
+@example dma-memory-template-example.cpp
+@example dma-spi-example.cpp
+@example dma-uart-example-mk20.cpp
+@example dma-uart-example-mk22f.cpp
+@example dma-uart-example-mk28f.cpp
+@example ewm-example.cpp
+@example flash-programming-example.cpp
 @example ftm-ic-example.cpp
 @example ftm-oc-example.cpp
 @example ftm-pwm-example.cpp
@@ -438,29 +584,36 @@ This is a template class with static methods.\n
 @example hmc5883l-example.cpp
 @example hmc5883l.cpp
 @example hmc5883l.h
-@example llwu-example.cpp
+@example i2c-example.cpp
+@example llwu-example-mk20.cpp
+@example llwu-example-mk22f.cpp
 @example lptmr-example.cpp
 @example mag3310-example.cpp
-@example mag3310.cpp
 @example mag3310.h
+@example mcg-run-mode-test-mk20.cpp
+@example mcg-run-mode-test-mk22f.cpp
+@example mcg-test.cpp
 @example mma845x-example.cpp
 @example mma845x.cpp
 @example mma845x.h
 @example mma8491q-example.cpp
 @example mma8491q.cpp
 @example mma8491q.h
-@example nonvolatile_example.cpp
+@example neopixel-example.cpp
+@example nonvolatile-example.cpp
 @example pca9685-example.cpp
 @example pca9685.cpp
 @example pca9685.h
+@example pdb-example.cpp
 @example pit-example1.cpp
 @example pit-example2.cpp
 @example pit-example3.cpp
-@example pdb-example.cpp
+@example rcm-example.cpp
+@example rnga-example.cpp
 @example rtc-example.cpp
-@example test-mcg.cpp
+@example spi-example.cpp
 @example tsi-mk-example.cpp
-@example usb.cpp
+@example uart-example.cpp
 @example usb_cdc_interface.cpp
 @example usb_cdc_interface.h
 @example usb_implementation.h
@@ -470,5 +623,10 @@ This is a template class with static methods.\n
 @example usb_implementation_cdc.h
 @example usb_implementation_composite.cpp
 @example usb_implementation_composite.h
+@example usb.cpp
+@example usbdcd-example.cpp
+@example vlpr-run-example.cpp
+@example vlpr-run-hsrun-example.cpp
+@example wdog-example.cpp
 
  */

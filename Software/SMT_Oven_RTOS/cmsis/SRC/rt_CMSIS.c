@@ -426,7 +426,7 @@ extern       osMessageQId    osMessageQId_osTimerMessageQ;
 
 // ==== Helper Functions ====
 
-/// Convert timeout in millisec to system ticks
+/// Convert timeout in millisecond to system ticks
 static uint16_t rt_ms2tick (uint32_t millisec) {
   uint32_t tick;
 
@@ -913,16 +913,18 @@ os_InRegs osEvent osWait (uint32_t millisec) {
 // ==== Timer Management ====
 
 // Timer definitions
-#define osTimerInvalid  0U
-#define osTimerStopped  1U
-#define osTimerRunning  2U
+typedef enum {
+   osTimerInvalid = 0U,
+   osTimerStopped = 1U,
+   osTimerRunning = 2U,
+} TimerState;
 
 // Timer structures
 
 typedef struct os_timer_cb_ {                   // Timer Control Block
   struct os_timer_cb_ *next;                    // Pointer to next active Timer
-  uint8_t             state;                    // Timer State
-  uint8_t              type;                    // Timer Type (Periodic/One-shot)
+  TimerState           state:8;                 // Timer State
+  os_timer_type         type:8;                 // Timer Type (Periodic/One-shot)
   uint16_t         reserved;                    // Reserved
   uint32_t             tcnt;                    // Timer Delay Count
   uint32_t             icnt;                    // Timer Initial Count
@@ -1480,7 +1482,7 @@ osStatus svcMutexDelete (osMutexId mutex_id) {
 
 // Mutex Public API
 
-/// Create and Initialize a Mutex object
+/// Create and Initialise a Mutex object
 osMutexId osMutexCreate (const osMutexDef_t *mutex_def) {
   if (__get_IPSR() != 0U) {
     return NULL;                                // Not allowed in ISR
@@ -1888,7 +1890,15 @@ os_InRegs osEvent_type svcMessageGet (osMessageQId queue_id, uint32_t millisec) 
 
 // Message Queue ISR Calls
 
-/// Put a Message to a Queue
+/**
+ * Put a Message to a Queue
+ *
+ * @param queue_id      ID of queue to use
+ * @param info          Arbitrary information to add
+ * @param millisec      Delay - must be zero
+ *
+ * @return Error if failed
+ */
 osStatus isrMessagePut (osMessageQId queue_id, uint32_t info, uint32_t millisec) {
 
   if ((queue_id == NULL) || (millisec != 0U)) {

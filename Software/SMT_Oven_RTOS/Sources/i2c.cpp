@@ -77,10 +77,10 @@ void I2c::sendAddress(uint8_t address) {
    addressedDevice = address;
 
    // Configure for Tx of address
-   i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_TX_MASK;
+   i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_TX_MASK;
 
    // Generate START
-   i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_TX_MASK|I2C_C1_MST_MASK;
+   i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_TX_MASK|I2C_C1_MST_MASK;
 
    // Tx address (starts interrupt process)
    i2c->D  = I2C_D_DATA(address);
@@ -93,8 +93,10 @@ void I2c::poll(void) {
 
    if ((i2c->S & I2C_S_ARBL_MASK) != 0) {
       i2c->S = I2C_S_ARBL_MASK|I2C_S_IICIF_MASK;
-      errorCode = 1;
+      errorCode = E_LOST_ARBITRATION;
       state = i2c_idle;
+      // Generate STOP
+      i2c->C1 = i2cMode|I2C_C1_IICEN_MASK;
       return;
    }
    if ((i2c->S & I2C_S_IICIF_MASK) == 0) {
@@ -115,6 +117,14 @@ void I2c::poll(void) {
 
    case i2c_txData:
       // Just send data bytes until none left
+      if ((i2c->S & I2C_S_RXAK_MASK) != 0) {
+         // No ACK on last Tx data byte
+         errorCode = E_NO_ACK;
+         state = i2c_idle;
+         // Generate STOP
+         i2c->C1 = i2cMode|I2C_C1_IICEN_MASK;
+         return;
+      }
       if (txBytesRemaining-- == 0) {
          if (rxBytesRemaining > 0) {
             // Reception after transmission
@@ -127,7 +137,7 @@ void I2c::poll(void) {
                i2c->F&=~I2C_F_MULT(3);
 #endif
                // Generate REPEATED-START
-               i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK|I2C_C1_TX_MASK|I2C_C1_RSTA_MASK;
+               i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK|I2C_C1_TX_MASK|I2C_C1_RSTA_MASK;
 #if defined(MCU_MKL25Z4)
                // Restore MULT
                i2c->F = temp;
@@ -146,9 +156,8 @@ void I2c::poll(void) {
          else {
             // Complete
             state = i2c_idle;
-
             // Generate stop signal
-            i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_TXAK_MASK;
+            i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_TXAK_MASK;
             return;
          }
       }
@@ -160,16 +169,24 @@ void I2c::poll(void) {
 
    case i2c_rxAddress:
       // Just sent address for reception phase
+      if ((i2c->S & I2C_S_RXAK_MASK) != 0) {
+         // No ACK on Tx read address byte
+         errorCode = E_NO_ACK;
+         state = i2c_idle;
+         // Generate STOP
+         i2c->C1 = i2cMode|I2C_C1_IICEN_MASK;
+         return;
+      }
       // Switch to data reception & trigger reception
       state = i2c_rxData;
       // Change to reception
       if (rxBytesRemaining == 1) {
          // Receiving only single byte (don't acknowledge the byte)
-         i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK|I2C_C1_TXAK_MASK;
+         i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK|I2C_C1_TXAK_MASK;
       }
       else {
          // Switch to Rx mode
-         i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK;
+         i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK;
       }
       // Dummy read of data to start Rx of 1st data byte
       (void)i2c->D;
@@ -181,14 +198,14 @@ void I2c::poll(void) {
          // Received last byte - complete
          state = i2c_idle;
          // Generate STOP
-         i2c->C1 = mode|I2C_C1_IICEN_MASK;
+         i2c->C1 = i2cMode|I2C_C1_IICEN_MASK;
       }
       else if (rxBytesRemaining == 1) {
          // Received 2nd last byte (don't acknowledge the last byte to follow)
-         i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK|I2C_C1_TXAK_MASK;
+         i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK|I2C_C1_TXAK_MASK;
       }
       else {
-         i2c->C1 = mode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK;
+         i2c->C1 = i2cMode|I2C_C1_IICEN_MASK|I2C_C1_MST_MASK;
       }
       // Save receive data
       *rxDataPtr++ = i2c->D;
@@ -199,18 +216,18 @@ void I2c::poll(void) {
 /**
  * Transmit message
  *
- * @param[in]  address  Address of slave to communicate with
+ * @param[in]  address  Address of slave to communicate with (should include LSB = R/W bit = 0)
  * @param[in]  size     Size of transmission data
  * @param[in]  data     Data to transmit, 0th byte is often register address
  *
  * @return E_NO_ERROR on success
  */
-int I2c::transmit(uint8_t address, uint16_t size, const uint8_t data[]) {
+ErrorCode I2c::transmit(uint8_t address, uint16_t size, const uint8_t data[]) {
 #ifdef __CMSIS_RTOS
    startTransaction();
 #endif
 
-   errorCode = 0;
+   errorCode = E_NO_ERROR;
 
    rxBytesRemaining = 0;
 
@@ -224,7 +241,7 @@ int I2c::transmit(uint8_t address, uint16_t size, const uint8_t data[]) {
    sendAddress(address);
    waitWhileBusy();
 
-   uint8_t tErrorCode = errorCode;
+   ErrorCode tErrorCode = errorCode;
 
 #ifdef __CMSIS_RTOS
    endTransaction();
@@ -236,17 +253,17 @@ int I2c::transmit(uint8_t address, uint16_t size, const uint8_t data[]) {
 /**
  * Receive message
  *
- * @param[in]  address  Address of slave to communicate with
+ * @param[in]  address  Address of slave to communicate with (should include LSB = R/W bit = 0)
  * @param[in]  size     Size of reception data
  * @param[out] data     Data buffer for reception
  *
  * @return E_NO_ERROR on success
  */
-int I2c::receive(uint8_t address, uint16_t size,  uint8_t data[]) {
+ErrorCode I2c::receive(uint8_t address, uint16_t size,  uint8_t data[]) {
 #ifdef __CMSIS_RTOS
    startTransaction();
 #endif
-   errorCode = 0;
+   errorCode = E_NO_ERROR;
 
    txBytesRemaining = 0;
 
@@ -260,7 +277,7 @@ int I2c::receive(uint8_t address, uint16_t size,  uint8_t data[]) {
    sendAddress(address|1);
    waitWhileBusy();
 
-   uint8_t tErrorCode = errorCode;
+   ErrorCode tErrorCode = errorCode;
 
 #ifdef __CMSIS_RTOS
    endTransaction();
@@ -273,7 +290,7 @@ int I2c::receive(uint8_t address, uint16_t size,  uint8_t data[]) {
  * Transmit message followed by receive message.
  * Uses repeated-start.
  *
- * @param[in]  address  Address of slave to communicate with
+ * @param[in]  address  Address of slave to communicate with (should include LSB = R/W bit = 0)
  * @param[in]  txSize   Size of transmission data
  * @param[in]  txData   Data for transmission
  * @param[in]  rxSize   Size of reception data
@@ -281,11 +298,11 @@ int I2c::receive(uint8_t address, uint16_t size,  uint8_t data[]) {
  *
  * @return E_NO_ERROR on success
  */
-int I2c::txRx(uint8_t address, uint16_t txSize, const uint8_t txData[], uint16_t rxSize, uint8_t rxData[] ) {
+ErrorCode I2c::txRx(uint8_t address, uint16_t txSize, const uint8_t txData[], uint16_t rxSize, uint8_t rxData[] ) {
 #ifdef __CMSIS_RTOS
    startTransaction();
 #endif
-   errorCode = 0;
+   errorCode = E_NO_ERROR;
 
    // Send address byte at start and move to data transmission
    state = i2c_txData;
@@ -299,7 +316,7 @@ int I2c::txRx(uint8_t address, uint16_t txSize, const uint8_t txData[], uint16_t
    sendAddress(address);
    waitWhileBusy();
 
-   uint8_t tErrorCode = errorCode;
+   ErrorCode tErrorCode = errorCode;
 
 #ifdef __CMSIS_RTOS
    endTransaction();
@@ -310,17 +327,17 @@ int I2c::txRx(uint8_t address, uint16_t txSize, const uint8_t txData[], uint16_t
 
 /**
  * Transmit message followed by receive message.
- * Uses repeated-start.
+ * Uses repeated-start.\n
  * Uses shared transmit and receive buffer
  *
- * @param[in]    address  Address of slave to communicate with
+ * @param[in]    address  Address of slave to communicate with (should include LSB = R/W bit = 0)
  * @param[in]    txSize   Size of transmission data
  * @param[in]    rxSize   Size of reception data
  * @param[inout] data     Data for transmission and reception
  *
  * @return E_NO_ERROR on success
  */
-int I2c::txRx(uint8_t address, uint16_t txSize, uint16_t rxSize, uint8_t data[] ) {
+ErrorCode I2c::txRx(uint8_t address, uint16_t txSize, uint16_t rxSize, uint8_t data[] ) {
    return txRx(address, txSize, data, rxSize, data);
 }
 

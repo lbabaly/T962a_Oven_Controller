@@ -8,10 +8,63 @@
  *
  *  Created on: 26Feb.,2017
  *      Author: podonoghue
+ *
+ * Remote Commands
+ *
+ * Identify oven
+ *  -> "IDN?"
+ *  <- "SMT-Oven 1.0.0.0"
+ *
+ * Set thermocouple enable and offset values
+ *  -> "THERM T1Enable,T1Offset,T2Enable,T2Offset,T3Enable,T3Offset,T4Enable,T4Offset"
+ *  <- "OK"
+ *
+ * Get thermocouple enable and offset values
+ *  -> "THERM?"
+ *  <- "T1Enable,T1Offset,T2Enable,T2Offset,T3Enable,T3Offset,T4Enable,T5Offset;"
+ *
+ * Set PID parameters
+ *  -> "PID Proportional,Integral,Differential"
+ *  <- "OK"
+ *
+ * Get PID parameters
+ *  -> "PID?"
+ *  <- "Proportional,Integral,Differential;"
+ *
+ * Set profile parameters
+ *  -> "PROF profile-number,description,flags,liquidus,preheatTime,soakTemp1,soakTemp2,soakTime,rampUpSlope,peakTemp,peakDwell,rampDownSlope;
+ *  <- "OK"
+ *
+ * Get current profile parameters
+ *  -> "PROF?"
+ *  -> "profile-number,description,flags,liquidus,preheatTime,soakTemp1,soakTemp2,soakTime,rampUpSlope,peakTemp,peakDwell,rampDownSlope;
+ *
+ *  Get plot value
+ *  <- "PLOT?"
+ *  -> 75;preheat,0,27.8,27.5,0,100,0.0,0.0,27.5,0.0;preheat,1,27.8,27.5,0,100,0.0,0.0,27.5,0.0;...//...;fail,74,0.0,27.8,100,30,0.0,0.0,27.8,0.0;
+ *  Format: number_of_points;[state,time,target temperature, average temperature, heater percentage, fan percentage, T1, T2, T3, T4]*number_of_points
+ *
+ * Start running current profile
+ *  <- "RUN"
+ *  -> "OK"
+ *
+ * Abort running profile
+ *  <- "ABORT"
+ *  -> "OK"
+ *
+ * Get state of running profile
+ *  <- "RUN?"
+ *  -> "OK|Failed|Running"
+ *
+ * Unknown command
+ *  <- "?????"
+ *  -> "Failed - unrecognized command"
  */
-#include <RemoteInterface.h>
-#include "cmsis.h"
+
 #include "configure.h"
+#include "cmsis.h"
+#include "RemoteInterface.h"
+#include "stringFormatter.h"
 
 /** Current command */
 RemoteInterface::Command   *RemoteInterface::command;
@@ -48,10 +101,8 @@ bool RemoteInterface::send(Response *response) {
 /**
  * Writes thermocouple status to remote
  *
- * @param time  Time of log entry to send
- * @param lastEntry Indicates this is the last entry so append "\n\r"
- *
- * @return Number of characters written to buffer
+ * @param time       Time of log entry to send
+ * @param lastEntry  Indicates this is the last entry so append "\n\r"
  */
 void RemoteInterface::logThermocoupleStatus(int time, bool lastEntry) {
 
@@ -65,37 +116,38 @@ void RemoteInterface::logThermocoupleStatus(int time, bool lastEntry) {
    const DataPoint &point = Draw::getDataPoint(time);
 
    // Format response
-   snprintf(reinterpret_cast<char*>(response->data), sizeof(response->data), "%s,%d,%0.1f,%0.1f,%d,%d,",
-         Reporter::getStateName(point.getState()),
-         time,
-         point.getTargetTemperature(),
-         point.getAverageTemperature(),
-         point.getHeater(),
-         point.getFan());
+   USBDM::StringFormatter sf(reinterpret_cast<char*>(response->data), sizeof(response->data));
+   sf.setFloatFormat(1);
+   sf.write(Reporter::getStateName(point.getState())).write(',')
+     .write(time).write(',')
+     .write(point.getTargetTemperature()).write(',')
+     .write(point.getAverageTemperature()).write(',')
+     .write(point.getHeater()).write(',')
+     .write(point.getFan()).write(',');
+
    for (unsigned t=0; t<DataPoint::NUM_THERMOCOUPLES; t++) {
-      char buff2[10];
       float temperature;
       point.getTemperature(t, temperature);
-      snprintf(buff2, sizeof(buff2), "%0.1f", temperature);
+      sf.write(temperature);
       if (t != 3) {
-         strcat(buff2,",");
+         sf.write(',');
       }
-      strcat(reinterpret_cast<char*>(response->data), buff2);
    }
-   strcat(reinterpret_cast<char*>(response->data), ";");
+   sf.write(';');
    if (lastEntry) {
       // Terminate the whole transfer sequence
-      strcat(reinterpret_cast<char*>(response->data),"\n\r");
+      sf.write("\n\r");
    }
-   response->size = strlen(reinterpret_cast<char*>(response->data));
-   RemoteInterface::send(response);
+   response->size = sf.length();
+   send(response);
 }
 
 /**
  *  Parse profile information into selected profile
  *
- *  @param cmd Profile described by a string e.g.\n
+ *  @param cmd    Profile described by a string e.g.\n
  *  4,My Profile,FF,1.0,140,183,90,1.4,210,15,-3.0;
+ *  profile-number,description,flags,liquidus,preheatTime,soakTemp1,soakTemp2,soakTime,rampUpSlope,peakTemp,peakDwell,rampDownSlope
  *
  *  @return true  Successfully parsed
  *  @return false Failed parse
@@ -124,7 +176,7 @@ bool parseProfile(char *cmd) {
       return false;
    }
 
-   strncpy(profile.description, tok, sizeof(profile.description));
+   strncpy(profile.description, tok, sizeof(profile.description)-1);
    tok = strtok(nullptr, ",");
    if (tok == nullptr) {
       return false;
@@ -285,6 +337,7 @@ bool RemoteInterface::getInteractiveMutex(RemoteInterface::Response *response) {
  * @return false => failed (A fail response has been sent to the remote)
  */
 bool RemoteInterface::doCommand(Command *cmd) {
+   using namespace USBDM;
 
    // Allocate response buffer
    Response *response = allocResponseBuffer();
@@ -293,150 +346,194 @@ bool RemoteInterface::doCommand(Command *cmd) {
       // This should be impossible
       return false;
    }
+   // Format response
+   StringFormatter sf(reinterpret_cast<char*>(response->data), sizeof(response->data));
+   sf.setFloatFormat(1);
 
    if (strcasecmp((const char *)(cmd->data), "IDN?\n") == 0) {
-      strcpy(reinterpret_cast<char*>(response->data), IDN);
-      response->size = strlen(IDN);
+      /*
+       *  Identify oven
+       *  -> "IDN?"
+       *  <- "SMT-Oven 1.0.0.0"
+       */
+      sf.write(IDN);
+      response->size = sf.length();
       send(response);
    }
    else if (strncasecmp((const char *)(cmd->data), "THERM ", 6) == 0) {
-      // Lock interface
+      /*
+       * Sets the enable and offset value for each thermocouple
+       * -> "THERM T1Enable,T1Offset,T2Enable,T2Offset,T3Enable,T3Offset,T4Enable,T4Offset"
+       * <- "OK"
+       */
       if (!getInteractiveMutex(response)) {
          return false;
       }
       if (parseThermocouples(reinterpret_cast<char*>(&cmd->data[6]))) {
-         strcpy(reinterpret_cast<char*>(response->data), "OK\n\r");
+         sf.write("OK\n\r");
       }
       else {
-         strcpy(reinterpret_cast<char*>(response->data), "Failed - Data error\n\r");
+         sf.write("Failed - Data error\n\r");
       }
       interactiveMutex.release();
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      response->size = sf.length();
       send(response);
    }
    else if (strcasecmp((const char *)(cmd->data), "THERM?\n") == 0) {
+      /*
+       *  Get thermocouple status
+       *  -> "THERM?"
+       *  <- "T1Enable,T1Offset,T2Enable,T2Offset,T3Enable,T3Offset,T4Enable,T5Offset;"
+       */
       response->data[0] = (uint8_t)'\0';
       for (int t=0; t<4; t++) {
-         char buff[10];
-         snprintf(buff, sizeof(buff),"%d,%d",
-               temperatureSensors.getThermocouple(t).isEnabled(),
-               temperatureSensors.getThermocouple(t).getOffset());
+         sf.write((int)temperatureSensors.getThermocouple(t).isEnabled()).write(',')
+           .write(temperatureSensors.getThermocouple(t).getOffset());
          if (t != 3) {
-            strcat(buff, ",");
+            sf.write(',');
          }
          else {
-            strcat(buff, ";\n\r");
+            sf.write(";\n\r");
          }
-         strcat(reinterpret_cast<char*>(response->data), buff);
       }
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      response->size = sf.length();
       send(response);
    }
    else if (strncasecmp((const char *)(cmd->data), "PID ", 4) == 0) {
+      /*
+       *  Set PID parameters
+       *  -> "PID Proportional,Integral,Differential"
+       *  <- "OK"
+       */
       // Lock interface
       if (!getInteractiveMutex(response)) {
          return false;
       }
       if (parsePidParameters(reinterpret_cast<char*>(&cmd->data[4]))) {
-         strcpy(reinterpret_cast<char*>(response->data), "OK\n\r");
+         sf.write("OK\n\r");
       }
       else {
-         strcpy(reinterpret_cast<char*>(response->data), "Failed - Data error\n\r");
+         sf.write("Failed - Data error\n\r");
       }
       interactiveMutex.release();
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      response->size = sf.length();
       send(response);
    }
    else if (strcasecmp((const char *)(cmd->data), "PID?\n") == 0) {
+      /*
+       *  Get PID parameters
+       *  -> "PID?"
+       *  <- "Proportional,Integral,Differential;"
+       */
       response->data[0] = (uint8_t)'\0';
-      snprintf(reinterpret_cast<char*>(response->data), sizeof(response->data), "%f,%f,%f\n\r",
-            (float)pidKp, (float)pidKi, (float)pidKd);
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      sf.write((float)pidKp).write(',');
+      sf.write((float)pidKi).write(',');
+      sf.write((float)pidKd).write("\n\r");
+      response->size = sf.length();
       send(response);
    }
    else if (strncasecmp((const char *)(cmd->data), "PROF ", 5) == 0) {
+      /*
+       *  Set profile parameters
+       *  -> "PROF profile-number,description,flags,liquidus,preheatTime,soakTemp1,soakTemp2,soakTime,rampUpSlope,peakTemp,peakDwell,rampDownSlope;
+       *  <- "OK"
+       */
       // Lock interface
       if (!getInteractiveMutex(response)) {
          return false;
       }
       if (parseProfile(reinterpret_cast<char*>(&cmd->data[5]))) {
-         strcpy(reinterpret_cast<char*>(response->data), "OK\n\r");
+         sf.write("OK\n\r");
       }
       else {
-         strcpy(reinterpret_cast<char*>(response->data), "Failed - data error\n\r");
+         sf.write("Failed - Data error\n\r");
       }
       interactiveMutex.release();
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      response->size = sf.length();
       send(response);
    }
    else if (strcasecmp((const char *)(cmd->data), "PROF?\n") == 0) {
+      /*
+       *  Get current profile parameters
+       *  -> "PROF?"
+       *  -> "profile-number,description,flags,liquidus,preheatTime,soakTemp1,soakTemp2,soakTime,rampUpSlope,peakTemp,peakDwell,rampDownSlope;
+       */
       const NvSolderProfile &profile = profiles[currentProfileIndex];
-      snprintf(reinterpret_cast<char*>(response->data), sizeof(response->data),
-            /* index         */ "%d,"
-            /* name          */ "%s,"
-            /* flags         */ "%2.2X,"
-            /* liquidus      */ "%d,"
-            /* preheatTime   */ "%d,"
-            /* soakTemp1     */ "%d,"
-            /* soakTemp2     */ "%d,"
-            /* soakTime      */ "%d,"
-            /* ramp2Slope    */ "%.1f,"
-            /* peakTemp      */ "%d,"
-            /* peakDwell     */ "%d,"
-            /* rampDownSlope */ "%.1f;\n\r",
-            (int)currentProfileIndex,
-            (const char *)profile.description,
-            (int)  profile.flags,
-            (int)  profile.liquidus,
-            (int)  profile.preheatTime,
-            (int)  profile.soakTemp1,
-            (int)  profile.soakTemp2,
-            (int)  profile.soakTime,
-            (float)profile.rampUpSlope,
-            (int)  profile.peakTemp,
-            (int)  profile.peakDwell,
-            (float)profile.rampDownSlope);
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      sf.write((int)          currentProfileIndex).write(',');     /* index         */
+      sf.write((const char *) profile.description).write(',');     /* description   */
+      sf.write((int)          profile.flags).write(',');           /* flags         */
+      sf.write((int)          profile.liquidus).write(',');        /* liquidus      */
+      sf.write((int)          profile.preheatTime).write(',');     /* preheatTime   */
+      sf.write((int)          profile.soakTemp1).write(',');       /* soakTemp1     */
+      sf.write((int)          profile.soakTemp2).write(',');       /* soakTemp2     */
+      sf.write((int)          profile.soakTime).write(',');        /* soakTime      */
+      sf.write((float)        profile.rampUpSlope).write(',');     /* ramp2Slope    */
+      sf.write((int)          profile.peakTemp).write(',');        /* peakTemp      */
+      sf.write((int)          profile.peakDwell).write(',');       /* peakDwell     */
+      sf.write((float)        profile.rampDownSlope).write(',');   /* rampDownSlope */
+      response->size = sf.length();
       send(response);
    }
    else if (strcasecmp((const char *)(cmd->data), "PLOT?\n") == 0) {
+      /*
+       *  Get plot value
+       *  <- "PLOT?"
+       *  -> 75;preheat,0,27.8,27.5,0,100,0.0,0.0,27.5,0.0;preheat,1,27.8,27.5,0,100,0.0,0.0,27.5,0.0;...//...;fail,74,0.0,27.8,100,30,0.0,0.0,27.8,0.0;
+       *  number_of_points;[state,time,target temperature, average temperature, heater percentage, fan percentage, T1, T2, T3, T4]*
+       */
       int lastValid = Draw::getData().getLastValid();
-      snprintf(reinterpret_cast<char*>(response->data), sizeof(response->data), "%d;", lastValid+1);
+      sf.write(lastValid+1).write(';');
       if (lastValid < 0) {
          // Terminate the response early
-         strcat(reinterpret_cast<char*>(response->data), "\n\r");
+         sf.write("\n\r");
       }
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      response->size = sf.length();
       send(response);
       for (int index=0; index<=lastValid; index++) {
          logThermocoupleStatus(index, index == lastValid);
       }
    }
    else if (strncasecmp((const char *)(cmd->data), "RUN\n\r", 4) == 0) {
+      /*
+       *   Start running current profile
+       *   <- "RUN"
+       *   -> "OK"
+       */
       // Lock interface
       if (!getInteractiveMutex(response)) {
          return false;
       }
       RunProfile::remoteStartRunProfile();
-      strcpy(reinterpret_cast<char*>(response->data), "OK\n\r");
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      sf.write("OK\n\r");
+      response->size = sf.length();
       send(response);
    }
    else if (strncasecmp((const char *)(cmd->data), "ABORT\n\r", 4) == 0) {
+      /*
+       *   Abort running profile
+       *   <- "ABORT"
+       *   -> "OK"
+       */
       // Lock interface
       if (!getInteractiveMutex(response)) {
          return false;
       }
       RunProfile::abortRunProfile();
-      // Unlock previous lock
-      interactiveMutex.release();
-      strcpy(reinterpret_cast<char*>(response->data), "OK\n\r");
       // Unlock interface
-      interactiveMutex.release();
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      osStatus mutexStatus;
+      do {
+         mutexStatus = interactiveMutex.release();
+      } while (mutexStatus == osOK);
+      sf.write("OK\n\r");
+      response->size = sf.length();
       send(response);
    }
    else if (strncasecmp((const char *)(cmd->data), "RUN?\n\r", 4) == 0) {
+      /*
+       * Get state of running profile
+       * <- "RUN?"
+       * -> "OK|Failed|Running"
+       */
       // Lock interface
       if (!getInteractiveMutex(response)) {
          return false;
@@ -445,24 +542,29 @@ bool RemoteInterface::doCommand(Command *cmd) {
       if (state == s_complete) {
          // Unlock previous lock
          interactiveMutex.release();
-         strcpy(reinterpret_cast<char*>(response->data), "OK\n\r");
+         sf.write("OK\n\r");
       }
       else if (state == s_fail) {
          // Unlock interface
          interactiveMutex.release();
-         strcpy(reinterpret_cast<char*>(response->data), "Failed\n\r");
+         sf.write("Failed\n\r");
       }
       else {
-         strcpy(reinterpret_cast<char*>(response->data), "Running\n\r");
+         sf.write("Running\n\r");
       }
       // Unlock interface
       interactiveMutex.release();
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      response->size = sf.length();
       send(response);
    }
    else {
-      strcpy(reinterpret_cast<char*>(response->data), "Failed - unrecognized command\n\r");
-      response->size = strlen(reinterpret_cast<char*>(response->data));
+      /*
+       * Unknown command
+       * <- "?????"
+       * -> "Failed - unrecognized command"
+       */
+      sf.write("Failed - unrecognized command\n\r");
+      response->size = sf.length();
       send(response);
    }
    return true;
@@ -511,7 +613,7 @@ void RemoteInterface::initialise() {
  *
  * @note the Data is volatile and is processed or saved immediately.
  */
-void RemoteInterface::putData(int size, const uint8_t *buff) {
+void RemoteInterface::putData(int size, volatile const uint8_t *buff) {
    for (int i=0; i<size; i++) {
       if (command == nullptr) {
          // Allocate new command buffer
@@ -523,7 +625,7 @@ void RemoteInterface::putData(int size, const uint8_t *buff) {
          command->size = 0;
       }
       // Check for command too large
-      assert(command->size<((sizeof(command->data)/sizeof(command->data[0]))-2));
+      usbdm_assert(command->size<((sizeof(command->data)/sizeof(command->data[0]))-2), "Command size too large");
 
       // Check for command termination
       if ((buff[i] == '\r') || (buff[i] == '\n')) {

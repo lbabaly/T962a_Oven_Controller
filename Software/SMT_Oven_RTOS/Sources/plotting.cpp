@@ -8,8 +8,9 @@
  */
 
 #include <algorithm>    // std::max
-#include <plotting.h>
-#include <TemperaturePlot.h>
+#include "configure.h"
+#include "plotting.h"
+#include "TemperaturePlot.h"
 #include "lcd_st7920.h"
 #include "configure.h"
 
@@ -116,7 +117,7 @@ static void drawAxis(int profileIndex) {
       lcd.gotoXY((X_ORIGIN+round(time/timeScale)-3), lcd.LCD_HEIGHT-5);
       lcd.putSmallDigit(time/60);
    }
-   static uint8_t min[] = {
+   static uint8_t min[] {
          209,88,
          168,100,
          171,68,
@@ -148,8 +149,9 @@ static void drawAxis(int profileIndex) {
    // Name
    lcd.gotoXY(NAME_OFFSET_X, NAME_OFFSET_Y);
    lcd.setInversion(true);
-   lcd.printf("%d:%s", profileIndex, (const volatile char *)(profiles[profileIndex].description));
-   lcd.putChar('\n');
+   lcd.write(profileIndex).write(":").write((const char *)(profiles[profileIndex].description));
+//   lcd.printf("%d:%s", profileIndex, (const volatile char *)(profiles[profileIndex].description));
+   lcd.write('\n');
    lcd.setInversion(false);
 }
 
@@ -190,7 +192,7 @@ protected:
          return;
       case s_init:
          state = s_preheat;
-         // no break
+         /* Fall through - no break */
       case s_preheat:
          // Heat from ambient to start of soak temperature
          // A -> soakTemp1 over preheatTime

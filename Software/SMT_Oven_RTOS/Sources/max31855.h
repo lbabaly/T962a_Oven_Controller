@@ -16,26 +16,27 @@
  * Class representing an MAX31855 connected over SPI
  */
 class Max31855 {
+
 public:
    enum ThermocoupleStatus {
-      TH_ENABLED,          // Enabled and OK
-      TH_OPEN,             // No probe or open circuit
-      TH_SHORT_VCC,        // Probe short to Vcc
-      TH_SHORT_GND,        // Probe short to Gnd
-      TH_MISSING,          // No response - Max31855 not present at that address
-      TH_DISABLED=0b111,   // Available but disabled (Temperature reading will still be valid)
+      TH_ENABLED,          //!< Enabled and OK
+      TH_OPEN,             //!< No probe or open circuit
+      TH_SHORT_VCC,        //!< Probe short to Vcc
+      TH_SHORT_GND,        //!< Probe short to Gnd
+      TH_MISSING,          //!< No response - Max31855 not present at that address
+      TH_DISABLED=0b111,   //!< Available but disabled (Temperature reading will still be valid)
    };
 
 protected:
 
    /** SPI configuration value */
-   uint32_t spiConfig = 0;
+   USBDM::SpiConfig spiConfig;
 
-   /** SPI used for LCD */
+   /** SPI used for communication */
    USBDM::Spi &spi;
 
-   /** Number of PCS signal to use */
-   const int pinNum;
+   /** Which PCS signal to use */
+   const USBDM::SpiPeripheralSelect pinNum;
 
    /** Offset to add to reading from probe */
    USBDM::Nonvolatile<int> &offset;
@@ -43,30 +44,39 @@ protected:
    /** Used to disable sensor */
    USBDM::Nonvolatile<bool> &enabled;
 
+   /** The result of last Temperature measurements */
+   float                lastTemperature;
+
+   /** The result of last Cold Reference Temperature measurements */
+   float                lastColdReference;
+
+   /** The status of last Temperature measurements */
+   ThermocoupleStatus   lastStatus;
+
 public:
    /**
     * Constructor
     *
     * @param[in] spi     The SPI to use to communicate with MAX31855
-    * @param[in] pinNum  Number of PCS to use
+    * @param[in] pinNum  PCS to use
     * @param[in] offset  Offset to add to reading from probe
     * @param[in] enabled Reference to non-volatile variable enabling thermocouple
     */
-   Max31855(USBDM::Spi &spi, int pinNum, USBDM::Nonvolatile<int> &offset, USBDM::Nonvolatile<bool> &enabled) :
-      spi(spi), pinNum(pinNum), offset(offset), enabled(enabled) {
-
-      spi.setPcsPolarity(pinNum, USBDM::ActiveLow);
+   Max31855(USBDM::Spi &spi, USBDM::SpiPeripheralSelect pinNum, USBDM::Nonvolatile<int> &offset, USBDM::Nonvolatile<bool> &enabled) :
+      spi(spi), pinNum(pinNum), offset(offset), enabled(enabled), lastTemperature(0), lastColdReference(0), lastStatus(TH_MISSING) {
+      using namespace USBDM;
 
       spi.startTransaction();
 
       // Configure SPI
-      spi.setSpeed(2500000);
-      spi.setMode(USBDM::SpiMode0);
-      spi.setDelays(0.1*USBDM::us, 0.1*USBDM::us, 0.1*USBDM::us);
+      spi.setPeripheralSelect(pinNum, ActiveLow);
+      spi.setSpeed(2.5*MHz);
+      spi.setMode(SpiMode_0);
       spi.setFrameSize(8);
 
       // Record configuration in case SPI is shared
-      spiConfig = spi.getCTAR0Value();
+      spiConfig = spi.getConfiguration();
+
       spi.endTransaction();
       }
 
@@ -79,12 +89,12 @@ public:
     */
    static const char *getStatusName(ThermocoupleStatus status) {
       switch (status) {
-      case TH_ENABLED   : return "OK";    // OK!
+      case TH_ENABLED   : return "OK  ";  // OK!
       case TH_OPEN      : return "Open";  // No probe or open circuit
-      case TH_SHORT_VCC : return "Vcc";   // Probe short to Vcc
-      case TH_SHORT_GND : return "Gnd";   // Probe short to Gnd
+      case TH_SHORT_VCC : return "Vcc ";  // Probe short to Vcc
+      case TH_SHORT_GND : return "Gnd ";  // Probe short to Gnd
       case TH_MISSING   : return "----";  // No response - Max31855 not present at that address
-      case TH_DISABLED  : return "Dis";   // OK but disabled
+      case TH_DISABLED  : return "Dis ";  // OK but disabled
       default           : return "????";  // Unknown
       }
    }
@@ -101,6 +111,8 @@ public:
 
    /**
     * Toggles the enables state of the sensor
+    *
+    * @note This is a non-volatile setting
     */
    void toggleEnable() {
       enabled = !enabled;
@@ -110,12 +122,16 @@ public:
     * Check if sensor is enabled
     *
     * @return true => enabled
+    *
+    * @note This is a non-volatile setting
     */
    bool isEnabled() const {
       return enabled;
    }
+
    /**
-    * Read thermocouple
+    * Read the thermocouple.
+    * This initiates an measure of the thermocouple and updates internal state as well as returning the new values.
     *
     * @param[out] temperature   Temperature reading of external probe (.25 degree resolution)
     * @param[out] coldReference Temperature reading of internal cold-junction reference (.0625 degree resolution)
@@ -124,23 +140,28 @@ public:
     *
     * @note Temperature and cold-junction may be valid even if the thermocouple is disabled (TH_DISABLED).
     */
-   ThermocoupleStatus getReading(float &temperature, float &coldReference) {
+   ThermocoupleStatus getNewReading(float &temperature, float &coldReference) {
       uint8_t data[] = {
             0xFF, 0xFF, 0xFF, 0xFF,
       };
-      spi.startTransaction(spiConfig);
-      spi.setPushrValue(SPI_PUSHR_CTAS(0)|SPI_PUSHR_PCS(1<<pinNum));
-      spi.txRxBytes(sizeof(data), nullptr, data);
-      spi.endTransaction();
+      {
+//      PulseTp tp(8);
 
+      spi.startTransaction(spiConfig);
+      {
+//         PulseTp tp(5);
+         spi.txRx(sizeof(data), (uint8_t*)nullptr, data);
+      }
+      spi.endTransaction();
+      }
       // Temperature = sign-extended 14-bit value
-      temperature = (((int16_t)((data[0]<<8)|data[1]))>>2)/4.0;
+      lastTemperature = (((int16_t)((data[0]<<8)|data[1]))>>2)/4.0;
 
       // Add manual offset
-      temperature += offset;
+      lastTemperature += offset;
 
       // Cold junction = sign-extended 12-bit value
-      coldReference = (((int16_t)((data[2]<<8)|data[3]))>>4)/16.0;
+      lastColdReference = (((int16_t)((data[2]<<8)|data[3]))>>4)/16.0;
 
       /*  Raw status
        *    0x000 => OK
@@ -150,52 +171,79 @@ public:
        *    0b111 => No response - Max31855 not present at that address
        */
       int rawStatus = data[3]&0x07;
-      ThermocoupleStatus status = TH_ENABLED;
+      lastStatus = TH_ENABLED;
       if (rawStatus != 0) {
-         // Invalid temperature measurement
-         temperature = NAN;
+         // Invalid lastTemperature measurement
+         lastTemperature = NAN;
       }
       if (rawStatus == 0x111) {
          // No device so no Cold reference
-         coldReference = NAN;
-         status = TH_MISSING;
+         lastColdReference = NAN;
+         lastStatus = TH_MISSING;
       }
       else if (rawStatus & 0b001) {
          //Open
-         status = TH_OPEN;
+         lastStatus = TH_OPEN;
       }
       else if (rawStatus & 0b010) {
          // Ground short
-         status = TH_SHORT_GND;
+         lastStatus = TH_SHORT_GND;
       }
       else if (rawStatus & 0b100) {
          // Vcc short
-         status = TH_SHORT_VCC;
+         lastStatus = TH_SHORT_VCC;
       }
       else if (!enabled) {
          // Available but not enabled
-         status = TH_DISABLED;
+         lastStatus = TH_DISABLED;
       }
-      // Return error flag
-      return status;
+      // Return results
+      temperature   = lastTemperature;
+      coldReference = lastColdReference;
+
+      // Return status flag
+      return lastStatus;
    }
 
    /**
-    * Read enabled thermocouple
+    * Get thermocouple reading.
+    * This does not initiate a new measurement - it just return the last measurement taken.
     *
     * @param[out] temperature   Temperature reading of external probe (.25 degree resolution)
     * @param[out] coldReference Temperature reading of internal cold-junction reference (.0625 degree resolution)
     *
     * @return Status of sensor
+    *
     * @note Temperature will be zero if the thermocouple is disabled or unusable.
     * @note Cold-junction will be valid even if the thermocouple is disabled (TH_DISABLED).
     */
-   ThermocoupleStatus getEnabledReading(float &temperature, float &coldReference) {
-      ThermocoupleStatus status = getReading(temperature, coldReference);
-      if (status == TH_DISABLED) {
+   ThermocoupleStatus getLastEnabledReading(float &temperature, float &coldReference) {
+      USBDM::CriticalSection cs;
+      temperature = lastTemperature;
+      if (lastStatus == TH_DISABLED) {
          temperature = 0;
       }
-      return status;
+      coldReference = lastColdReference;
+      return lastStatus;
+   }
+
+   /**
+    * Get thermocouple reading.
+    * This does not initiate a new measurement - it just return the last measurement taken.
+    *
+    * @param[out] temperature   Temperature reading of external probe (.25 degree resolution)
+    * @param[out] coldReference Temperature reading of internal cold-junction reference (.0625 degree resolution)
+    *
+    * @return Status of sensor
+    *
+    * @note Temperature will be zero if the thermocouple is disabled or unusable.
+    * @note Cold-junction will be valid even if the thermocouple is disabled (TH_DISABLED).
+    */
+   ThermocoupleStatus getLastReading(float &temperature, float &coldReference) {
+      USBDM::CriticalSection cs;
+      temperature   = lastTemperature;
+      coldReference = lastColdReference;
+      return lastStatus;
    }
 
    /**
@@ -213,6 +261,8 @@ public:
     * Get offset that is added to temperature reading
     *
     * @return Offset as an integer
+    *
+    * @note This is a non-volatile setting
     */
    int getOffset() {
       return offset;

@@ -10,6 +10,7 @@
 #define SOURCES_SWITCHDEBOUNCER_H_
 
 #include "cmsis.h"
+#include "pit.h"
 
 /**
  * Return values from switch
@@ -104,7 +105,7 @@ public:
  * F1..F4 have auto-repeat function
  */
 template<typename f1, typename f2, typename f3, typename f4, typename sel>
-class SwitchDebouncer : private CMSIS::TimerClass {
+class SwitchDebouncer  {
 
 private:
    /*
@@ -134,8 +135,8 @@ private:
    /** Buffer to implement peek() */
    SwitchValue lookaheadKey;
 
-   uint debounceCount = 0;
-   uint lastSnapshot  = 0;
+   unsigned debounceCount = 0;
+   unsigned lastSnapshot  = 0;
 
    /**
     * Get Key from queue
@@ -155,13 +156,15 @@ private:
    /**
     * Called at a regular rate by a CMSIS timer to poll the switches
     */
-   void callback() override {
+   void callback() {
+//      PulseTp tp;
+
       uint8_t snapshot =
-            (f1::read()? SwitchValue::SW_F1:0)|
-            (f2::read()? SwitchValue::SW_F2:0)|
-            (f3::read()? SwitchValue::SW_F3:0)|
-            (f4::read()? SwitchValue::SW_F4:0)|
-            (sel::read()?SwitchValue::SW_S:0);
+            (f1::isPressed()? SwitchValue::SW_F1:0)|
+            (f2::isPressed()? SwitchValue::SW_F2:0)|
+            (f3::isPressed()? SwitchValue::SW_F3:0)|
+            (f4::isPressed()? SwitchValue::SW_F4:0)|
+            (sel::isPressed()?SwitchValue::SW_S:0);
 
       if ((snapshot != 0) && (snapshot == lastSnapshot)) {
          // Keys pressed and unchanged
@@ -184,6 +187,11 @@ private:
       }
       lastSnapshot  = snapshot;
    }
+   static SwitchDebouncer *This;
+
+   static void shim() {
+      This->callback();
+   }
 
 public:
    /**
@@ -191,14 +199,21 @@ public:
     */
    SwitchDebouncer() {
       using namespace USBDM;
-      f1::setInput(pcrValue(PinPullUp, PinDriveStrengthHigh, PinDriveModePushPull, PinIrqNone));
-      f2::setInput();
-      f3::setInput();
-      f4::setInput();
-      sel::setInput();
+      f1::setInput(PinPull_Up);
+      f2::setInput(PinPull_Up);
+      f3::setInput(PinPull_Up);
+      f4::setInput(PinPull_Up);
+      sel::setInput(PinPull_Up);
 
       keyQueue.create();
-      start(TICK_INTERVAL);
+      using Pit = USBDM::Pit;
+      Pit::configure(PitDebugMode_Stop);
+      PitChannelNum pitNum = Pit::allocateChannel();
+      This = this;
+      Pit::setCallback(pitNum, shim);
+      Pit::configureChannel(pitNum, TICK_INTERVAL*ms, PitChannelIrq_Enabled);
+      Pit::enableNvicInterrupts(pitNum, NvicPriority_Normal);
+//      start(TICK_INTERVAL);
    }
 
    /**
@@ -232,5 +247,8 @@ public:
       return deQueue(millisecondsToWait);
    }
 };
+
+template<typename f1, typename f2, typename f3, typename f4, typename sel>
+SwitchDebouncer<f1, f2, f3, f4, sel> *SwitchDebouncer<f1, f2, f3, f4, sel>::This = nullptr;
 
 #endif /* SOURCES_SWITCHDEBOUNCER_H_ */

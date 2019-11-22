@@ -10,13 +10,39 @@
 #define SOURCES_CONFIGURE_H_
 
 #include <string.h>
+#include "derivative.h"
+#include "hardware.h"
+
+/** Test point */
+using Tp1      = USBDM::GpioB<17, USBDM::ActiveHigh>;
+
+class PulseTp {
+public:
+   PulseTp(unsigned pulseCount) {
+      USBDM::CriticalSection cs;
+      Tp1::set();
+      pulseCount *= 2;
+      while (pulseCount-->0) {
+         for (unsigned index=0; index<20; index++) {
+            __asm__("nop");
+         }
+         Tp1::toggle();
+      }
+      for (unsigned index=0; index<50; index++) {
+         __asm__("nop");
+      }
+   }
+
+   ~PulseTp() {
+      Tp1::clear();
+   }
+};
+
 #include "Max31855.h"
 #include "SolderProfile.h"
 #include "SwitchDebouncer.h"
 #include "ZeroCrossingPwm.h"
 
-#include "derivative.h"
-#include "hardware.h"
 #include "cmp.h"
 #include "delay.h"
 #include "spi.h"
@@ -26,12 +52,12 @@
 #include "settings.h"
 #include "runProfile.h"
 
-/** PCS # for SPI connected to LCD and Thermocouples */
-static constexpr int lcd_cs_num = 4;
-static constexpr int t1_cs_num  = 2;
-static constexpr int t2_cs_num  = 3;
-static constexpr int t3_cs_num  = 1;
-static constexpr int t4_cs_num  = 0;
+/** SPI_PCSx signals for SPI connected to LCD and Thermocouples */
+static constexpr USBDM::SpiPeripheralSelect lcd_cs = USBDM::SpiPeripheralSelect_4;
+static constexpr USBDM::SpiPeripheralSelect t1_cs  = USBDM::SpiPeripheralSelect_2;
+static constexpr USBDM::SpiPeripheralSelect t2_cs  = USBDM::SpiPeripheralSelect_3;
+static constexpr USBDM::SpiPeripheralSelect t3_cs  = USBDM::SpiPeripheralSelect_1;
+static constexpr USBDM::SpiPeripheralSelect t4_cs  = USBDM::SpiPeripheralSelect_0;
 
 /**
  * SPI used for LCD and Thermocouples
@@ -51,10 +77,10 @@ using F4Button = USBDM::GpioB<0, USBDM::ActiveLow>;
 using SButton  = USBDM::GpioB<16, USBDM::ActiveLow>;
 
 /** Case fan PWM output */
-using CaseFan  = USBDM::Ftm0Channel<2>;
+using CaseFan  = USBDM::Ftm0::Channel<2>;
 
 /** Spare fan PWM output */
-using Spare    = USBDM::Ftm0Channel<3>;
+using Spare    = USBDM::Ftm0::Channel<3>;
 
 /**
  * Oven fan LED - Wrapper for GPIO
@@ -66,7 +92,7 @@ public:
     */
    static void init() {
       using namespace USBDM;
-      setOutput(pcrValue(PinPullNone, PinDriveStrengthLow));
+      setOutput(PinDriveStrength_Low, PinDriveMode_PushPull, PinSlewRate_Slow);
    }
 };
 /**
@@ -79,7 +105,7 @@ public:
     */
    static void init() {
       using namespace USBDM;
-      setOutput(pcrValue(PinPullNone, PinDriveStrengthLow));
+      setOutput(PinDriveStrength_Low, PinDriveMode_PushPull, PinSlewRate_Slow);
    }
 };
 
@@ -104,7 +130,7 @@ using Vmains     = USBDM::Cmp0;
 extern LCD_ST7920 lcd;
 
 /** PWM for heater & oven fan */
-extern ZeroCrossingPwm <Heater, HeaterLed, OvenFan, OvenFanLed, Vmains> ovenControl;
+extern ZeroCrossingPwm<Heater, HeaterLed, OvenFan, OvenFanLed, Vmains> ovenControl;
 
 /** Switch debouncer for front panel buttons */
 extern SwitchDebouncer<F1Button, F2Button, F3Button, F4Button, SButton> buttons;
@@ -122,7 +148,7 @@ public:
     */
    static void init() {
       using namespace USBDM;
-      setOutput(pcrValue(PinPullNone, PinDriveStrengthLow));
+      setOutput(PinDriveStrength_Low, PinDriveMode_PushPull, PinSlewRate_Slow);
    }
    /**
     * Sound buzzer with abort on button press.\n
@@ -151,17 +177,17 @@ extern TemperatureSensors temperatureSensors;
 extern CaseTemperatureMonitor<CaseFan> caseTemperatureMonitor;
 
 /**
- * Set heater drive level (for PID)
- */
-extern void outPutControl(float dutyCycle);
-
-/**
  * Get oven temperature (for PID)
  * Averages multiple thermocouple inputs
  *
  * @return Averaged oven temperature
  */
 extern float getTemperature();
+
+/**
+ * Set heater drive level (for PID)
+ */
+extern void outPutControl(float dutyCycle);
 
 /**
  * PID controller

@@ -11,6 +11,7 @@
 #include <usb_cdc_interface.h>
 #include <algorithm>
 #include "cmsis.h"
+#include "configure.h"
 #include "plotting.h"
 #include "reporter.h"
 
@@ -24,10 +25,16 @@ class RemoteInterface: public USBDM::CDC_Interface {
 
 public:
    /** Structure holding a command */
-   using Command  = struct {uint8_t data[100];  unsigned size; };
+   struct Command {
+      uint8_t data[100];
+      unsigned size;
+   };
 
    /** Structure holding (part of) a response */
-   using Response = struct {uint8_t data[1000]; unsigned size; };
+   struct Response{
+      uint8_t  data[1000];
+      unsigned size;
+   };
 
 protected:
    RemoteInterface() {}
@@ -70,11 +77,14 @@ protected:
    static bool getInteractiveMutex(RemoteInterface::Response *response);
 
    /**
-    * Handle command
+    * Execute remote command
     *
-    * @param[in] cmd Command to process
+    * @param command Command string from remote
+    *
+    * @return true  => success
+    * @return false => failed (A fail response has been sent to the remote)
     */
-   static bool doCommand(Command *cmd);
+   static bool doCommand(Command *command);
 
    /**
     * Thread handling CDC traffic
@@ -85,7 +95,7 @@ public:
    /**
     * Get response
     *
-    * @return osEvent
+    * @return Response or nullptr if none available
     */
    static RemoteInterface::Response *getResponse() {
       osEvent status = RemoteInterface::responseQueue.getISR();
@@ -100,18 +110,17 @@ public:
    /**
     * Used to free response buffer
     *
-    * @param[in,out] response Buffer to free
+    * @param[in] response Response buffer to free
     */
-   static void freeResponseBuffer(RemoteInterface::Response *&response) {
+   static void freeResponseBuffer(RemoteInterface::Response *response) {
       RemoteInterface::responseQueue.free(response);
-      response = nullptr;
    }
 
    /**
-    * Allocate send buffer
+    * Allocate response (send) buffer
     *
     * @return Pointer to allocated buffer
-    * @return NULL Failed allocation
+    * @return nullptr Failed allocation
     */
    static Response *allocResponseBuffer() {
       return responseQueue.alloc();
@@ -140,7 +149,7 @@ public:
     *
     * @note the Data is volatile and is processed or saved immediately.
     */
-   static void putData(int size, const uint8_t *buff);
+   static void putData(int size, volatile const uint8_t *buff);
 };
 
 #endif /* SOURCES_REMOTEINTERFACE_H_ */

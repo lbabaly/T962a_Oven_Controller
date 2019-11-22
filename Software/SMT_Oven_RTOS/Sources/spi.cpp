@@ -1,7 +1,7 @@
 /**
  * @file spi.cpp  (180.ARM_Peripherals/Sources/spi-MK.cpp)
  *
- * @version  V4.12.1.80
+ * @version  V4.12.1.210
  * @date     13 April 2016
  */
 #include <stddef.h>
@@ -21,8 +21,8 @@
  */
 namespace USBDM {
 
-static const uint16_t pbrFactors[] = {2,3,5,7};
-static const uint16_t brFactors[]  = {2,4,6,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768};
+static const uint16_t pbrFactors[] {2,3,5,7};
+static const uint16_t brFactors[] {2,4,6,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768};
 
 /**
  * Calculate communication speed factors for SPI
@@ -40,20 +40,20 @@ uint32_t Spi::calculateDividers(uint32_t clockFrequency, uint32_t frequency) {
       // Use highest possible rate
       return SPI_CTAR_DBR_MASK;
    }
-   int bestPBR = 0;
-   int bestBR  = 0;
-   uint32_t difference = -1;
-   uint32_t calculatedFrequency;
+   int bestPBR = 3;
+   int bestBR  = 7;
+   int32_t bestDifference = 0x7FFFFFFF;
    for (int pbr = 3; pbr >= 0; pbr--) {
       for (int br = 15; br >= 0; br--) {
-         calculatedFrequency = clockFrequency/(pbrFactors[pbr]*brFactors[br]);
-         if (calculatedFrequency > frequency) {
+         uint32_t calculatedFrequency = clockFrequency/(pbrFactors[pbr]*brFactors[br]);
+         int32_t difference = frequency-calculatedFrequency;
+         if (difference < 0) {
             // Too high stop looking here
             break;
          }
-         if ((frequency - calculatedFrequency) < difference) {
+         if (difference < bestDifference) {
             // New "best value"
-            difference = (frequency - calculatedFrequency);
+            bestDifference = difference;
             bestBR  = br;
             bestPBR = pbr;
          }
@@ -66,6 +66,7 @@ uint32_t Spi::calculateDividers(uint32_t clockFrequency, uint32_t frequency) {
    }
    return clockFactors;
 }
+
 /**
  * Calculates speed from SPI clock frequency and SPI clock factors
  *
@@ -97,20 +98,21 @@ uint32_t Spi::calculateSpeed(uint32_t clockFrequency, uint32_t clockFactors) {
  */
 void Spi::calculateDelay(float clockFrequency, float delay, int &bestPrescale, int &bestDivider) {
    const float clockPeriod = (1/clockFrequency);
-   float difference = MAXFLOAT;
+   float bestDifference = MAXFLOAT;
 
-   bestPrescale = -1;
-   bestDivider  = -1;
+   bestPrescale = 0;
+   bestDivider  = 0;
    for (int prescale = 3; prescale >= 0; prescale--) {
       for (int divider = 15; divider >= 0; divider--) {
          float calculatedDelay = clockPeriod*((prescale<<1)+1)*(1UL<<(divider+1));
-         if (calculatedDelay < delay) {
+         float difference = calculatedDelay - delay;
+         if (difference < 0) {
             // Too short - stop looking here
             break;
          }
-         if ((calculatedDelay - delay) < difference) {
+         if (difference < bestDifference) {
             // New "best delay"
-            difference = (calculatedDelay - delay);
+            bestDifference = difference;
             bestPrescale = prescale;
             bestDivider  = divider;
          }
@@ -121,83 +123,17 @@ void Spi::calculateDelay(float clockFrequency, float delay, int &bestPrescale, i
 /**
  * Transmit and receive a value over SPI
  *
- * @param[in] data - Data to send (8-16 bits) <br>
+ * @param[in] data - Data to send (4-16 bits) <br>
  *                   May include other control bits
  *
  * @return Data received
  */
-uint32_t Spi::txRx(uint32_t data) {
-   spi->MCR &= ~SPI_MCR_HALT_MASK;
-   spi->PUSHR = data;
+uint32_t Spi::txRx(uint16_t data) {
+   spi->PUSHR = data|pushrMask;
    while ((spi->SR & SPI_SR_TCF_MASK)==0) {
-      __asm__("nop");
    }
    spi->SR = SPI_SR_TCF_MASK|SPI_SR_EOQF_MASK;
    return spi->POPR;  // Return read data
-}
-
-/**
- *  Transmit and receive a series of 4 to 8-bit values
- *
- *  @param[in]  dataSize  Number of values to transfer
- *  @param[in]  txData    Transmit bytes (may be NULL for Rx only)
- *  @param[out] rxData    Receive byte buffer (may be NULL for Tx only)
- *
- *  Note: rxData may use same buffer as txData
- */
-void Spi::txRxBytes(uint32_t dataSize, const uint8_t *txData, uint8_t *rxData) {
-   while(dataSize-->0) {
-      uint32_t sendData = 0xFF;
-      if (txData != 0) {
-         sendData = *txData++;
-      }
-      if (dataSize == 0) {
-         sendData |= SPI_PUSHR_EOQ_MASK;
-      }
-      else {
-         sendData |= SPI_PUSHR_CONT_MASK;
-      }
-      uint32_t data = txRx(sendData|pushrMask);
-      if (rxData != 0) {
-         *rxData++ = data;
-      }
-   }
-   spi->MCR |= SPI_MCR_HALT_MASK;
-   while ((spi->SR&SPI_SR_TXRXS_MASK)) {
-      __asm__("nop");
-   }
-}
-
-/**
- *  Transmit and receive a series of 9 to 16-bit values
- *
- *  @param[in]  dataSize  Number of values to transfer
- *  @param[in]  txData    Transmit values (may be NULL for Rx only)
- *  @param[out] rxData    Receive buffer (may be NULL for Tx only)
- *
- *  Note: rxData may use same buffer as txData
- */
-void Spi::txRxWords(uint32_t dataSize, const uint16_t *txData, uint16_t *rxData) {
-   while(dataSize-->0) {
-      uint32_t sendData = 0xFFFF;
-      if (txData != 0) {
-         sendData = *txData++;
-      }
-      if (dataSize == 0) {
-         sendData |= SPI_PUSHR_EOQ_MASK;
-      }
-      else {
-         sendData |= SPI_PUSHR_CONT_MASK;
-      }
-      uint32_t data = txRx(sendData|pushrMask);
-      if (rxData != 0) {
-         *rxData++ = data;
-      }
-   }
-   spi->MCR |= SPI_MCR_HALT_MASK;
-   while ((spi->SR&SPI_SR_TXRXS_MASK)) {
-      __asm__("nop");
-   }
 }
 
 } // End namespace USBDM

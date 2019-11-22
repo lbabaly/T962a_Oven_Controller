@@ -9,10 +9,28 @@
 #ifndef SOURCES_MESSAGEBOX_H_
 #define SOURCES_MESSAGEBOX_H_
 
-#include "SwitchDebouncer.h"
+#include "configure.h"
+//#include "SwitchDebouncer.h"
 
-enum MessageBoxSelection {MSG_OK, MSG_OK_CANCEL, MSG_YES_NO, MSG_YES_NO_CANCEL};
-enum MessageBoxResult    {MSG_IS_OK, MSG_IS_CANCEL, MSG_IS_YES, MSG_IS_NO};
+/**
+ * Controls options for choice display on message box
+ */
+enum MessageBoxSelection {
+   MSG_OK,          //!< MSG_OK
+   MSG_OK_CANCEL,   //!< MSG_OK_CANCEL
+   MSG_YES_NO,      //!< MSG_YES_NO
+   MSG_YES_NO_CANCEL//!< MSG_YES_NO_CANCEL
+};
+
+/**
+ * Values used to indicate selection in message box
+ */
+enum MessageBoxResult    {
+   MSG_IS_OK,    //!< MSG_IS_OK
+   MSG_IS_CANCEL,//!< MSG_IS_CANCEL
+   MSG_IS_YES,   //!< MSG_IS_YES
+   MSG_IS_NO     //!< MSG_IS_NO
+};
 
 /**
  * Writes a full screen message to LCD

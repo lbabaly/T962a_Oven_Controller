@@ -1,4 +1,4 @@
-/** 
+/**
     @file usb.cpp
     @brief Simple USB Stack for Kinetis
 
@@ -41,17 +41,26 @@ Change History
  * Any manual changes will be lost.
  */
 #include <string.h>
-#include <stdio.h>
 #include "derivative.h"
 #include "usb.h"
+#include "stringFormatter.h"
 
 namespace USBDM {
 
 /** BDTs organised by endpoint, odd/even, tx/rx */
-EndpointBdtEntry endPointBdts[Usb0::NUMBER_OF_ENDPOINTS] __attribute__ ((aligned (512)));
+volatile EndpointBdtEntry endPointBdts[Usb0::NUMBER_OF_ENDPOINTS] __attribute__ ((aligned (512)));
+
+/** End-points in use */
+Endpoint *UsbBase::fEndPoints[UsbImplementation::NUMBER_OF_ENDPOINTS];
 
 #ifdef MS_COMPATIBLE_ID_FEATURE
 
+const uint8_t UsbBase::fMsOsStringDescriptor[] = {
+      18, DT_STRING, 'M',0,'S',0,'F',0,'T',0,'1',0,'0',0,'0',0,GET_MS_FEATURE_DESCRIPTOR,0x00
+};
+
+// See https://github.com/pbatard/libwdi/wiki/WCID-Devices
+//
 const MS_CompatibleIdFeatureDescriptor msCompatibleIdFeatureDescriptor = {
       /* lLength;             */  nativeToLe32((uint32_t)sizeof(MS_CompatibleIdFeatureDescriptor)),
       /* wVersion;            */  nativeToLe16(0x0100),
@@ -80,11 +89,11 @@ const MS_PropertiesFeatureDescriptor msPropertiesFeatureDescriptor = {
             sizeof(msPropertiesFeatureDescriptor.wPropertyLength0)+
             sizeof(msPropertiesFeatureDescriptor.bData0)
       ),
-      /* uint32_t ldataType0;       */ nativeToLe32(1U), // 1 = Unicode string
+      /* uint32_t ldataType0;       */ nativeToLe32(7UL), // 7 == REG_MULTI_SZ
       /* uint16_t wNameLength0;     */ nativeToLe16(sizeof(msPropertiesFeatureDescriptor.bName0)),
-      /* char16_t bName0[42];       */ MS_DEVICE_INTERFACE_GUIDs,
+      /* char16_t  bName0[42];      */ MS_DEVICE_INTERFACE_GUIDs,
       /* uint32_t wPropertyLength0; */ nativeToLe32(sizeof(msPropertiesFeatureDescriptor.bData0)),
-      /* char16_t bData0[78];       */ MS_DEVICE_GUID,
+      /* char16_t  bData0[78];      */ MS_DEVICE_GUID,
       /*---------------------- Section 2 -----------------------------*/
       /* uint32_t lPropertySize1;   */ nativeToLe32(
             sizeof(msPropertiesFeatureDescriptor.lPropertySize1)+
@@ -94,18 +103,19 @@ const MS_PropertiesFeatureDescriptor msPropertiesFeatureDescriptor = {
             sizeof(msPropertiesFeatureDescriptor.wPropertyLength1)+
             sizeof(msPropertiesFeatureDescriptor.bData1)
       ),
-      /* uint32_t ldataType1;       */ nativeToLe32(2U), // 2 = Unicode string with environment variables
+      /* uint32_t ldataType1;       */ nativeToLe32(7UL), // 7 == REG_MULTI_SZ
       /* uint16_t wNameLength1;     */ nativeToLe16(sizeof(msPropertiesFeatureDescriptor.bName1)),
       /* uint8_t  bName1[];         */ MS_ICONS,
       /* uint32_t wPropertyLength1; */ nativeToLe32(sizeof(msPropertiesFeatureDescriptor.bData1)),
       /* uint8_t  bData1[];         */ MS_ICON_PATH,
 };
+
 #endif
 
 /**
  * Get name of USB token
  *
- * @param  token USB token
+ * @param[in]  token USB token
  *
  * @return Pointer to static string
  */
@@ -136,30 +146,9 @@ const char *UsbBase::getTokenName(unsigned token) {
 }
 
 /**
- * Get name of USB state
- *
- * @param  state USB state
- *
- * @return Pointer to static string
- */
-const char *UsbBase::getStateName(EndpointState state){
-   switch (state) {
-      default         : return "Unknown";
-      case EPIdle     : return "EPIdle";
-      case EPDataIn   : return "EPDataIn";
-      case EPDataOut  : return "EPDataOut,";
-      case EPStatusIn : return "EPStatusIn";
-      case EPStatusOut: return "EPStatusOut";
-      case EPThrottle : return "EPThrottle";
-      case EPStall    : return "EPStall";
-      case EPComplete : return "EPComplete";
-   }
-}
-
-/**
  * Get name of USB request
  *
- * @param  reqType Request type
+ * @param[in]  reqType Request type
  *
  * @return Pointer to static string
  */
@@ -192,76 +181,91 @@ const char *UsbBase::getRequestName(uint8_t reqType){
 /**
  * Report contents of BDT
  *
- * @param name    Descriptive name to use
- * @param bdt     BDT to report
+ * @param[in] name    Descriptive name to use
+ * @param[in] bdt     BDT to report
  */
 void UsbBase::reportBdt(const char *name, BdtEntry *bdt) {
    (void)name;
    (void)bdt;
-   if (bdt->u.setup.own) {
-      PRINTF("%s addr=0x%08lX, bc=%d, %s, %s, %s\n",
-            name,
-            bdt->addr, bdt->bc,
-            bdt->u.setup.data0_1?"DATA1":"DATA0",
-                  bdt->u.setup.bdt_stall?"STALL":"OK",
-                        "USB"
-      );
+   if (bdt->own) {
+      console.write(name).
+            write(" addr=0x").write(bdt->addr,Radix_16).
+            write(", bc=").write(bdt->bc).
+            write(", ").write(bdt->data0_1?"DATA1":"DATA0").
+            write(", ").write(bdt->setup.bdt_stall?"STALL":"OK").
+            writeln("USB");
    }
    else {
-      PRINTF("%s addr=0x%08lX, bc=%d, %s, %s\n",
-            name,
-            bdt->addr, bdt->bc,
-            getTokenName(bdt->u.result.tok_pid),
-            "PROC"
-      );
+      console.write(name).
+            write(" addr=0x").write(bdt->addr,Radix_16).
+            write(", bc=").write(bdt->bc).
+            write(", ").write(getTokenName(bdt->result.tok_pid)).
+            writeln("PROC");
    }
 }
 
+/**
+ * Report line code structure values
+ *
+ * @param[in] lineCodingStructure
+ */
 void reportLineCoding(const LineCodingStructure *lineCodingStructure) {
    (void)lineCodingStructure;
-   PRINTF("rate   = %ld bps\n", lineCodingStructure->dwDTERate);
-   PRINTF("format = %d\n", lineCodingStructure->bCharFormat);
-   PRINTF("parity = %d\n", lineCodingStructure->bParityType);
-   PRINTF("bits   = %d\n", lineCodingStructure->bDataBits);
+   console.write("rate   = ").writeln(lineCodingStructure->dwDTERate);
+   console.write("format = ").writeln(lineCodingStructure->bCharFormat);
+   console.write("parity = ").writeln(lineCodingStructure->bParityType);
+   console.write("bits   = ").writeln(lineCodingStructure->bDataBits);
 }
 
 /**
  * Format SETUP packet as string
  *
- * @param p SETUP packet
+ * @param[in]  p SETUP packet
  *
  * @return Pointer to static buffer
  */
-const char *UsbBase::reportSetupPacket(SetupPacket *p) {
-   static char buff[100];
-   snprintf(buff, sizeof(buff), "[%2X,%s,%d,%d,%d]",
-         p->bmRequestType,
-         getRequestName(p->bRequest),
-         (int)(p->wValue),
-         (int)(p->wIndex),
-         (int)(p->wLength)
-   );
-   return buff;
+const char *UsbBase::getSetupPacketDescription(SetupPacket *p) {
+#ifdef DEBUG_BUILD
+   static StringFormatter_T<100> sf;
+   sf.clear().
+         write("[").
+         write(p->bmRequestType, Radix_2).write(",").
+         write(getRequestName(p->bRequest)).write(",").
+         write(p->wValue, Radix_16).write(",").
+         write(p->wIndex).write(",").
+         write(p->wLength).write("]");
+   return sf.toString();
+#else
+   (void)p;
+   return "";
+#endif
 }
 
+/**
+ * Report line state value to stdout
+ *
+ * @param[in] value
+ */
 void reportLineState(uint8_t value) {
    (void)value;
-   PRINTF("Line state: RTS=%d, DTR=%d\n", (value&(1<<1))?1:0, (value&(1<<0))?1:0);
+   console.
+   writeln("Line state: RTS=").write((value&(1<<1))?1:0).
+   write("DTR=").writeln((value&(1<<0))?1:0);
 }
 
 /**
  *  Creates a valid string descriptor in UTF-16-LE from a limited UTF-8 string
  *
- *  @param to       Where to place descriptor
- *  @param from     Zero terminated UTF-8 C string
- *  @param maxSize  Size of destination
+ *  @param[in] to       Where to place descriptor
+ *  @param[in] from     Zero terminated UTF-8 C string
+ *  @param[in] maxSize  Size of destination
  *
  *  @note Only handles UTF-8 characters that fit in a single UTF-16 value.
  */
-void UsbBase::utf8ToStringDescriptor(uint8_t *to, const uint8_t *from, unsigned maxSize) {
-   uint8_t *size = to; // 1st byte is where to place descriptor size
+void UsbBase::utf8ToStringDescriptor(volatile uint8_t *to, volatile const uint8_t *from, unsigned maxSize) {
+   volatile uint8_t *size = to; // 1st byte is where to place descriptor size
 
-   *to++ = 2;         // 1st byte = descriptor size (2 bytes so far)
+   *to++ = 2;         // 1st byte = descriptor size (2 bytes so far including DT_STRING)
    *to++ = DT_STRING; // 2nd byte = descriptor type, DT_STRING;
 
    while (*from != '\0') {

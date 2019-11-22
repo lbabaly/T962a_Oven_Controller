@@ -5,10 +5,10 @@
  *      Author: podonoghue
  */
 
-#ifndef PROJECT_HEADERS_QUEUE_H_
-#define PROJECT_HEADERS_QUEUE_H_
+#ifndef INCLUDE_USBDM_QUEUE_H_
+#define INCLUDE_USBDM_QUEUE_H_
 
-#include <assert.h>
+#include "system.h"
 
 /**
  * Simple queue implementation
@@ -18,9 +18,10 @@
  */
 template<class T, int QUEUE_SIZE>
 class Queue {
-   T fBuff[QUEUE_SIZE];
-   T *fHead, *fTail;
-   int fNumberOfElements;
+   T        fBuff[QUEUE_SIZE];
+   T        *fHead, *fTail;
+   int      fNumberOfElements;
+//   uint32_t fLock;
 
 public:
    /*
@@ -29,6 +30,15 @@ public:
    Queue() : fHead(fBuff), fTail(fBuff), fNumberOfElements(0) {
    }
 
+   /**
+    * Clear queue i.e. make empty
+    */
+   void clear() {
+      USBDM::CriticalSection cs;
+      fHead             = fBuff;
+      fTail             = fBuff;
+      fNumberOfElements = 0;
+   }
    /*
     * Check if empty
     *
@@ -51,12 +61,29 @@ public:
     * @param[in]  element Element to add
     */
    void enQueue(T element) {
-      assert(!isFull());
-      *fTail++ = element;
-      fNumberOfElements++;
-      if (fTail>=(fBuff+QUEUE_SIZE)) {
-         fTail = fBuff;
+      bool success = enQueueDiscardOnFull(element);
+      (void)success;
+      usbdm_assert(success, "Queue full");
+   }
+   /*
+    * Add element to queue. Discards on full.
+    *
+    * @param[in]  element Element to add
+    *
+    * @return true  => Element enqueued
+    * @return false => Queue full, element not added
+    */
+   bool enQueueDiscardOnFull(T element) {
+      USBDM::CriticalSection cs;
+      bool hasSpace = !isFull();
+      if (hasSpace) {
+         *fTail++ = element;
+         fNumberOfElements++;
+         if (fTail>=(fBuff+QUEUE_SIZE)) {
+            fTail = fBuff;
+         }
       }
+      return hasSpace;
    }
    /*
     * Remove & return element from queue
@@ -64,7 +91,8 @@ public:
     * @param[in]  element Element to add
     */
    T deQueue() {
-      assert(!isEmpty());
+      USBDM::CriticalSection cs;
+      usbdm_assert(!isEmpty(), "Queue empty");
       uint8_t t = *fHead++;
       fNumberOfElements--;
       if (fHead>=(fBuff+QUEUE_SIZE)) {
@@ -75,4 +103,4 @@ public:
 
 };
 
-#endif /* PROJECT_HEADERS_QUEUE_H_ */
+#endif /* INCLUDE_USBDM_QUEUE_H_ */

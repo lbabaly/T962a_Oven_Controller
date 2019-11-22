@@ -3,7 +3,6 @@
  * @brief   Basic UART routines for console
  * @date    13 June 2015
  */
-#include <derivative.h>
 
  /*
  * *****************************
@@ -14,25 +13,38 @@
  * Any manual changes will be lost.
  */
 
-#ifndef CONSOLE_H_
-#define CONSOLE_H_
+#ifndef INCLUDE_USBDM_CONSOLE_H_
+#define INCLUDE_USBDM_CONSOLE_H_
+#include <derivative.h>
+#include "hardware.h"
+
+#if defined(USBDM_UART0_IS_DEFINED) || defined(USBDM_UART1_IS_DEFINED) || defined(USBDM_UART2_IS_DEFINED) || defined(USBDM_UART3_IS_DEFINED) || defined(USBDM_UART4_IS_DEFINED)
+#include "uart.h"
+#endif
+#if defined(USBDM_LPUART0_IS_DEFINED) || defined(USBDM_LPUART1_IS_DEFINED) || defined(USBDM_LPUART2_IS_DEFINED)
+#include "lpuart.h"
+#endif
+
+#define USE_CONSOLE 1
+
+#if USE_CONSOLE
 
 #ifdef __cplusplus
 namespace USBDM {
 
 /**
- * @addtogroup CONSOLE_Group Console
- * @brief Console serial interface
+ * @addtogroup CONSOLE_Group Console, Console Interface
+ * @brief Abstraction for Console Interface
  * @{
  */
 
-// Default baud rate for console
+//! Default baud rate for console
 constexpr int defaultBaudRate = 115200;
 
-// Maps console to UART used
+//! Maps console to UART used
 using  Console = USBDM::Uart0;
 
-// Console instance
+//! Console instance
 extern Console console;
 
 /**
@@ -76,4 +88,7 @@ int  console_rxChar(void);
 #ifdef __cplusplus
 }
 #endif
-#endif /* CONSOLE_H_ */
+
+#endif /* USE_CONSOLE */
+
+#endif /* INCLUDE_USBDM_CONSOLE_H_ */
